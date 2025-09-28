@@ -71,3 +71,4 @@ test_*.py
 # Documentation
 *.pptx
 *.pdf
+.vercel
