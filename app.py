@@ -26,27 +26,59 @@ app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
 csrf = CSRFProtect(app)
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(BASE_DIR, "expense.db")
+
+# Database configuration for different environments
+if os.environ.get('VERCEL'):
+    # Production environment (Vercel)
+    database_url = os.environ.get('DATABASE_URL', 'sqlite:///:memory:')
+    
+    if database_url.startswith('sqlite:///'):
+        # SQLite configuration for Vercel
+        if database_url == 'sqlite:///expense.db':
+            # Use in-memory database for Vercel (data will be lost between requests)
+            app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+            print("⚠️  WARNING: Using in-memory SQLite database. Data will be lost between requests!")
+        else:
+            app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+    elif database_url.startswith('postgres'):
+        # PostgreSQL configuration
+        if database_url.startswith('postgres://'):
+            database_url = database_url.replace('postgres://', 'postgresql://', 1)
+        app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+    else:
+        # Fallback to in-memory SQLite
+        app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+        print("⚠️  WARNING: Using in-memory SQLite database. Data will be lost between requests!")
+else:
+    # Local development environment
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(BASE_DIR, "expense.db")
+
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
 # Configure logging
 if not app.debug:
-    if not os.path.exists('logs'):
-        os.mkdir('logs')
-    try:
-        file_handler = RotatingFileHandler('logs/expense_tracker.log', maxBytes=10240, backupCount=10)
-        file_handler.setFormatter(logging.Formatter(
-            '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
-        ))
-        file_handler.setLevel(logging.INFO)
-        app.logger.addHandler(file_handler)
+    if os.environ.get('VERCEL'):
+        # In Vercel, use console logging only
         app.logger.setLevel(logging.INFO)
-        app.logger.info('Expense Tracker startup')
-    except (PermissionError, OSError) as e:
-        # If logging fails, just use console logging
-        print(f"Warning: Could not set up file logging: {e}")
-        app.logger.setLevel(logging.INFO)
+        app.logger.info('Expense Tracker startup on Vercel')
+    else:
+        # Local development - use file logging
+        if not os.path.exists('logs'):
+            os.mkdir('logs')
+        try:
+            file_handler = RotatingFileHandler('logs/expense_tracker.log', maxBytes=10240, backupCount=10)
+            file_handler.setFormatter(logging.Formatter(
+                '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+            ))
+            file_handler.setLevel(logging.INFO)
+            app.logger.addHandler(file_handler)
+            app.logger.setLevel(logging.INFO)
+            app.logger.info('Expense Tracker startup')
+        except (PermissionError, OSError) as e:
+            # If logging fails, just use console logging
+            print(f"Warning: Could not set up file logging: {e}")
+            app.logger.setLevel(logging.INFO)
 
 # Input validation functions
 def validate_email(email):
