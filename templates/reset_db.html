@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}Reset Database - Expense Tracker{% endblock %}
+
+{% block content %}
+<div class="reset-container">
+    <div class="reset-card">
+        <h2>Reset Database</h2>
+        <p class="warning-text">⚠️ This will delete all data and cannot be undone!</p>
+        
+        <div class="reset-info">
+            <h3>What will be deleted:</h3>
+            <ul>
+                <li>All user accounts</li>
+                <li>All expenses</li>
+                <li>All budgets</li>
+                <li>All templates</li>
+            </ul>
+        </div>
+        
+        <form method="POST" action="{{ url_for('reset_database') }}" onsubmit="return confirmReset()">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <button type="submit" class="btn btn-danger">Reset Database</button>
+            <a href="{{ url_for('home') }}" class="btn btn-secondary">Cancel</a>
+        </form>
+    </div>
+</div>
+
+<style>
+.reset-container {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 20px;
+}
+
+.reset-card {
+    background: white;
+    border-radius: 20px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+    padding: 40px;
+    width: 100%;
+    max-width: 500px;
+    text-align: center;
+}
+
+.reset-card h2 {
+    color: #2c3e50;
+    margin-bottom: 20px;
+    font-size: 28px;
+}
+
+.warning-text {
+    color: #e74c3c;
+    font-weight: 600;
+    font-size: 18px;
+    margin-bottom: 30px;
+    padding: 15px;
+    background: #fdf2f2;
+    border-radius: 10px;
+    border: 1px solid #f5c6cb;
+}
+
+.reset-info {
+    text-align: left;
+    margin-bottom: 30px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 10px;
+}
+
+.reset-info h3 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+}
+
+.reset-info ul {
+    color: #666;
+    margin: 0;
+    padding-left: 20px;
+}
+
+.reset-info li {
+    margin-bottom: 5px;
+}
+
+.btn {
+    display: inline-block;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    text-decoration: none;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border: none;
+    margin: 0 10px;
+}
+
+.btn-danger {
+    background: #e74c3c;
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #c0392b;
+    transform: translateY(-2px);
+}
+
+.btn-secondary {
+    background: #95a5a6;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #7f8c8d;
+    color: white;
+    text-decoration: none;
+}
+</style>
+
+<script>
+function confirmReset() {
+    return confirm("Are you absolutely sure you want to reset the database? This action cannot be undone!");
+}
+</script>
+{% endblock %}

@@ -1,0 +1,335 @@
+{% extends "base.html" %}
+{% from "macros/forms.html" import render_field %}
+
+{% block title %}Dashboard - Expense Tracker{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Welcome Section -->
+    <div class="welcome-section">
+        <div class="welcome-content">
+            <h1 class="welcome-title">Welcome back, {{ name }}! 👋</h1>
+            <p class="welcome-subtitle">Here's your financial overview for this month</p>
+        </div>
+        <div class="welcome-actions">
+            <a href="{{ url_for('expenses') }}" class="btn btn-primary btn-lg">
+                <span class="btn-icon">➕</span>
+                Add Expense
+            </a>
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="summary-cards">
+        <div class="summary-card summary-card-primary">
+            <div class="card-icon">💸</div>
+            <div class="card-content">
+                <h3 class="card-title">Total Expenses</h3>
+                <div class="card-value">₹{{ "%.2f"|format(total_expenses) }}</div>
+                <div class="card-subtitle">This Month</div>
+            </div>
+        </div>
+
+        <div class="summary-card summary-card-secondary">
+            <div class="card-icon">🎯</div>
+            <div class="card-content">
+                <h3 class="card-title">Monthly Budget</h3>
+                <div class="card-value">₹{{ "%.2f"|format(budget_amount) }}</div>
+                <div class="card-subtitle">Set Limit</div>
+            </div>
+        </div>
+
+        <div class="summary-card summary-card-{% if remaining >= 0 %}success{% else %}danger{% endif %}">
+            <div class="card-icon">{% if remaining >= 0 %}💰{% else %}⚠️{% endif %}</div>
+            <div class="card-content">
+                <h3 class="card-title">Remaining</h3>
+                <div class="card-value">₹{{ "%.2f"|format(remaining) }}</div>
+                <div class="card-subtitle">{% if remaining >= 0 %}Available{% else %}Overspent{% endif %}</div>
+            </div>
+        </div>
+
+        <div class="summary-card summary-card-info">
+            <div class="card-icon">📊</div>
+            <div class="card-content">
+                <h3 class="card-title">Status</h3>
+                <div class="card-value">
+                    {% if remaining >= 0 %}
+                    <span class="status-badge status-success">On Track</span>
+                    {% else %}
+                    <span class="status-badge status-danger">Overspent</span>
+                    {% endif %}
+                </div>
+                <div class="card-subtitle">Budget Health</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Section -->
+    <div class="charts-section">
+        <!-- Budget Utilization Chart -->
+        {% if budget_amount > 0 %}
+        <div class="chart-card">
+            <div class="chart-header">
+                <h2 class="chart-title">📈 Budget Utilization</h2>
+                <div class="chart-percentage">{{ "%.1f"|format((total_expenses / budget_amount * 100)) }}%</div>
+            </div>
+            <div class="chart-body">
+                <div class="chart-wrapper">
+                    <canvas id="budgetChart"></canvas>
+                </div>
+                <div class="chart-details">
+                    <div class="detail-item">
+                        <span class="detail-label">Spent:</span>
+                        <span class="detail-value">₹{{ "%.2f"|format(total_expenses) }}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Budget:</span>
+                        <span class="detail-value">₹{{ "%.2f"|format(budget_amount) }}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Remaining:</span>
+                        <span
+                            class="detail-value {% if remaining >= 0 %}text-success{% else %}text-danger{% endif %}">₹{{
+                            "%.2f"|format(remaining) }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Category Breakdown Chart -->
+        {% if expenses_by_category %}
+        <div class="chart-card">
+            <div class="chart-header">
+                <h2 class="chart-title">📊 Expenses by Category</h2>
+                <div class="chart-controls">
+                    <button class="chart-toggle active" data-chart="bar">Bar</button>
+                    <button class="chart-toggle" data-chart="doughnut">Doughnut</button>
+                </div>
+            </div>
+            <div class="chart-body">
+                <div class="chart-wrapper">
+                    <canvas id="categoryChart"></canvas>
+                </div>
+                <div class="category-legend" id="categoryLegend">
+                    <!-- Legend will be populated by JavaScript to match chart colors -->
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Pass data from server to client - clean separation of concerns
+    const dashboardData = {
+        totalExpenses: {{ total_expenses }},
+    budgetAmount: {{ budget_amount }},
+    remaining: {{ remaining }},
+    expensesByCategory: {{ expenses_by_category | tojson if expenses_by_category else '{}' }}
+    };
+
+    // Wait for Chart.js to be available
+    function waitForChart() {
+        if (typeof Chart !== 'undefined') {
+            initializeCharts();
+        } else {
+            setTimeout(waitForChart, 100);
+        }
+    }
+
+    function initializeCharts() {
+        // Budget Utilization Chart
+        if (dashboardData.budgetAmount > 0) {
+            const budgetCtx = document.getElementById('budgetChart');
+            if (budgetCtx) {
+                const spent = dashboardData.totalExpenses;
+                const remaining = Math.max(0, dashboardData.budgetAmount - dashboardData.totalExpenses);
+
+                new Chart(budgetCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Spent', 'Remaining'],
+                        datasets: [{
+                            data: [spent, remaining],
+                            backgroundColor: [
+                                spent > dashboardData.budgetAmount ? '#ef4444' : '#22c55e',
+                                '#e5e7eb'
+                            ],
+                            borderColor: '#ffffff',
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom',
+                                labels: {
+                                    padding: 20,
+                                    usePointStyle: true
+                                }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function (context) {
+                                        const value = context.parsed;
+                                        const percentage = ((value / dashboardData.budgetAmount) * 100).toFixed(1);
+                                        return context.label + ': ₹' + value.toFixed(2) + ' (' + percentage + '%)';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        // Category Breakdown Chart
+        if (Object.keys(dashboardData.expensesByCategory).length > 0) {
+            const categoryCtx = document.getElementById('categoryChart');
+            if (categoryCtx) {
+                const labels = Object.keys(dashboardData.expensesByCategory);
+                const values = Object.values(dashboardData.expensesByCategory);
+                const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6'];
+
+                // Function to update legend with correct colors
+                function updateLegend(labels, values, colors) {
+                    const legendContainer = document.getElementById('categoryLegend');
+                    legendContainer.innerHTML = '';
+                    
+                    labels.forEach((label, index) => {
+                        if (values[index] > 0) {
+                            const legendItem = document.createElement('div');
+                            legendItem.className = 'legend-item';
+                            legendItem.innerHTML = `
+                                <div class="legend-color" style="background-color: ${colors[index % colors.length]};"></div>
+                                <span class="legend-label">${label}</span>
+                                <span class="legend-value">₹${values[index].toFixed(2)}</span>
+                            `;
+                            legendContainer.appendChild(legendItem);
+                        }
+                    });
+                }
+
+                let currentChart = new Chart(categoryCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Amount (₹)',
+                            data: values,
+                            backgroundColor: colors.slice(0, labels.length),
+                            borderColor: '#ffffff',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function (context) {
+                                        return '₹' + context.parsed.y.toFixed(2);
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    callback: function (value) {
+                                        return '₹' + value.toFixed(0);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+
+                // Update legend with correct colors
+                updateLegend(labels, values, colors);
+
+                // Chart toggle functionality
+                document.querySelectorAll('.chart-toggle').forEach(btn => {
+                    btn.addEventListener('click', function () {
+                        document.querySelectorAll('.chart-toggle').forEach(b => b.classList.remove('active'));
+                        this.classList.add('active');
+
+                        const chartType = this.dataset.chart;
+                        currentChart.destroy();
+
+                        currentChart = new Chart(categoryCtx, {
+                            type: chartType,
+                            data: {
+                                labels: labels,
+                                datasets: [{
+                                    label: 'Amount (₹)',
+                                    data: values,
+                                    backgroundColor: colors.slice(0, labels.length),
+                                    borderColor: '#ffffff',
+                                    borderWidth: chartType === 'bar' ? 1 : 2
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: {
+                                        display: chartType === 'doughnut'
+                                    },
+                                    tooltip: {
+                                        callbacks: {
+                                            label: function (context) {
+                                                if (chartType === 'doughnut') {
+                                                    const value = context.parsed;
+                                                    const total = values.reduce((a, b) => a + b, 0);
+                                                    const percentage = ((value / total) * 100).toFixed(1);
+                                                    return context.label + ': ₹' + value.toFixed(2) + ' (' + percentage + '%)';
+                                                } else {
+                                                    return '₹' + context.parsed.y.toFixed(2);
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                scales: chartType === 'bar' ? {
+                                    y: {
+                                        beginAtZero: true,
+                                        ticks: {
+                                            callback: function (value) {
+                                                return '₹' + value.toFixed(0);
+                                            }
+                                        }
+                                    }
+                                } : {}
+                            }
+                        });
+                        
+                        // Update legend when switching chart types
+                        updateLegend(labels, values, colors);
+                    });
+                });
+            }
+        }
+
+        // Update sidebar stats
+        if (typeof updateSidebarStats === 'function') {
+            updateSidebarStats(dashboardData.totalExpenses);
+        }
+    }
+
+    // Start waiting for Chart.js when DOM is ready
+    document.addEventListener('DOMContentLoaded', function () {
+        waitForChart();
+    });
+</script>
+{% endblock %}

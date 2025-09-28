@@ -1,0 +1,98 @@
+<!-- Top Navigation Partial -->
+<nav class="top-nav">
+    <div class="nav-brand">
+        <a href="{% if session.get('user_id') %}{{ url_for('admin_dashboard') if session.get('role') == 'admin' else url_for('dashboard') }}{% else %}{{ url_for('home') }}{% endif %}"
+            class="brand-link">
+            <span class="brand-icon">💰</span>
+            <span class="brand-text">Expense Tracker</span>
+        </a>
+    </div>
+
+    <div class="nav-actions">
+        {% if session.get('user_id') %}
+        <!-- Quick Actions for Authenticated Users -->
+        <div class="quick-actions">
+            {% if session.get('role') == 'admin' %}
+            <a href="{{ url_for('admin_users') }}" class="quick-action-btn admin-quick-action" title="Manage Users">
+                <span class="quick-action-icon">👥</span>
+            </a>
+            {% else %}
+            <!-- Regular User Quick Actions -->
+            <a href="{{ url_for('expenses') }}" class="quick-action-btn" title="Add Expense">
+                <span class="quick-action-icon">➕</span>
+            </a>
+            <a href="{{ url_for('budget') }}" class="quick-action-btn" title="Set Budget">
+                <span class="quick-action-icon">💰</span>
+            </a>
+            <a href="{{ url_for('reports') }}" class="quick-action-btn" title="View Reports">
+                <span class="quick-action-icon">📊</span>
+            </a>
+            {% endif %}
+        </div>
+
+        <!-- User Info -->
+        <div class="user-info">
+            <span class="user-name">
+                {{ session.get('username', 'User') }}
+                {% if session.get('role') == 'admin' %}
+                <span class="user-role-badge">ADMIN</span>
+                {% endif %}
+            </span>
+            <div class="user-menu">
+                <button class="user-menu-toggle" onclick="toggleUserMenu()">
+                    <span class="user-avatar">{{ session.get('username', 'U')[0].upper() }}</span>
+                    <span class="dropdown-arrow">▼</span>
+                </button>
+                <div class="user-menu-dropdown" id="userMenu">
+                    <a href="{{ url_for('admin_dashboard') if session.get('role') == 'admin' else url_for('dashboard') }}"
+                        class="menu-item">
+                        <span class="menu-icon">📊</span>
+                        Dashboard
+                    </a>
+                    {% if session.get('role') != 'admin' %}
+                    <a href="{{ url_for('expenses') }}" class="menu-item">
+                        <span class="menu-icon">💳</span>
+                        Expenses
+                    </a>
+                    <a href="{{ url_for('budget') }}" class="menu-item">
+                        <span class="menu-icon">💰</span>
+                        Budget
+                    </a>
+                    <a href="{{ url_for('reports') }}" class="menu-item">
+                        <span class="menu-icon">📈</span>
+                        Reports
+                    </a>
+                    {% endif %}
+                    {% if session.get('role') == 'admin' %}
+                    <div class="menu-divider"></div>
+                    <a href="{{ url_for('admin_users') }}" class="menu-item admin-item">
+                        <span class="menu-icon">👥</span>
+                        Manage Users
+                    </a>
+                    {% endif %}
+                    <div class="menu-divider"></div>
+                    <a href="{{ url_for('profile') }}" class="menu-item">
+                        <span class="menu-icon">👤</span>
+                        Profile
+                    </a>
+                    <a href="{{ url_for('logout') }}" class="menu-item">
+                        <span class="menu-icon">🚪</span>
+                        Logout
+                    </a>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="auth-links">
+            <a href="{{ url_for('login') }}" class="btn btn-outline">Login</a>
+            <a href="{{ url_for('register') }}" class="btn btn-primary">Register</a>
+        </div>
+        {% endif %}
+
+        <button class="mobile-menu-toggle" onclick="toggleSidebar()">
+            <span class="hamburger"></span>
+            <span class="hamburger"></span>
+            <span class="hamburger"></span>
+        </button>
+    </div>
+</nav>

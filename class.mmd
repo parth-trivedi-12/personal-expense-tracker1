@@ -1,0 +1,93 @@
+classDiagram
+    direction TB
+
+    %% ---------------- User ----------------
+    class User {
+        +[PK] user_id : int
+        +username : string
+        +email : string
+        +password : string
+
+        +register()
+        +login()
+        +logout()
+        +updateProfile()
+    }
+
+    %% ---------------- Admin ----------------
+    class Admin {
+        +[PK] admin_id : int
+        +[FK] user_id : int
+        +permissions : string
+        +last_login : datetime
+
+        +manageUsers()
+        +viewReports()
+    }
+
+    %% ---------------- Expense ----------------
+    class Expense {
+        +[PK] expense_id : int
+        +[FK] user_id : int
+        +[FK] category_id : int
+        +title : string
+        +amount : float
+        +date : date
+        +payment_method : string
+        +description : string
+
+        +addExpense()
+        +editExpense()
+        +deleteExpense()
+        +viewExpense()
+    }
+
+    %% ---------------- Category ----------------
+    class Category {
+        +[PK] category_id : int
+        +name : string
+        +description : string
+
+        +addCategory()
+        +editCategory()
+        +deleteCategory()
+        +listCategories()
+    }
+
+    %% ---------------- Budget ----------------
+    class Budget {
+        +[PK] budget_id : int
+        +[FK] user_id : int
+        +amount : float
+        +start_date : date
+        +end_date : date
+
+        +setBudget()
+        +updateBudget()
+        +getRemaining()
+        +alertOverspend()
+    }
+
+    %% ---------------- Report ----------------
+    class Report {
+        +[PK] report_id : int
+        +[FK] user_id : int
+        +start_date : date
+        +end_date : date
+        +generated_on : date
+        +total_expenses : float
+        +remaining_budget : float
+
+        +generateReport()
+        +exportCSV()
+        +exportPDF()
+    }
+
+    %% ---------------- Relationships ----------------
+    User "1" --> "*" Expense
+    Category "1" --> "*" Expense
+    User "1" --> "1" Budget
+    User "1" --> "*" Report
+    Admin "1" --> "*" User : manages
+    Report "*" -- "*" Expense : summarizes
+    Budget "1" --> "1..*" Expense : monitors

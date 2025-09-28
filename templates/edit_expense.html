@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% from "macros/forms.html" import render_field, render_submit %}
+
+{% block title %}Edit Expense - Expense Tracker{% endblock %}
+
+{% block content %}
+<div class="edit-expense-container">
+    <!-- Header Section -->
+    <div class="edit-header">
+        <div class="header-content">
+            <h1 class="page-title">✏️ Edit Expense</h1>
+            <p class="page-subtitle">Update your expense details</p>
+        </div>
+        <div class="header-actions">
+            <a href="{{ url_for('view_expense', id=expense.id) }}" class="btn btn-outline btn-lg">
+                <span class="btn-icon">👁️</span>
+                View Details
+            </a>
+        </div>
+    </div>
+
+    <!-- Edit Form Card -->
+    <div class="edit-form-card">
+        <div class="form-header">
+            <h2 class="form-title">📝 Update Expense Details</h2>
+            <p class="form-subtitle">Modify the information below and save your changes</p>
+        </div>
+        <div class="form-body">
+            <form method="POST" class="expense-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="title" class="form-label">
+                            <span class="label-icon">📝</span>
+                            Expense Title
+                            <span class="required">*</span>
+                        </label>
+                        <input type="text" id="title" name="title" class="form-control"
+                            placeholder="e.g., Grocery Shopping" value="{{ expense.title }}" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="amount" class="form-label">
+                            <span class="label-icon">💰</span>
+                            Amount
+                            <span class="required">*</span>
+                        </label>
+                        <div class="amount-input-group">
+                            <div class="currency-symbol">₹</div>
+                            <input type="number" id="amount" name="amount" class="form-control amount-input"
+                                placeholder="0.00" step="0.01" min="0" max="999999.99" value="{{ expense.amount }}"
+                                required>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="date" class="form-label">
+                            <span class="label-icon">📅</span>
+                            Date
+                            <span class="required">*</span>
+                        </label>
+                        <input type="date" id="date" name="date" class="form-control"
+                            value="{{ expense.date.strftime('%Y-%m-%d') }}" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="category" class="form-label">
+                            <span class="label-icon">🏷️</span>
+                            Category
+                            <span class="required">*</span>
+                        </label>
+                        <select id="category" name="category" class="form-control category-select" required>
+                            <option value="">Select Category</option>
+                            {% for category in user_categories %}
+                            <option value="{{ category.name }}" data-color="{{ category.color }}"
+                                data-icon="{{ category.icon }}" {% if expense.category==category.name %}selected{% endif
+                                %}>
+                                {{ category.icon }} {{ category.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="payment_method" class="form-label">
+                            <span class="label-icon">💳</span>
+                            Payment Method
+                            <span class="required">*</span>
+                        </label>
+                        <select id="payment_method" name="payment_method" class="form-control" required>
+                            <option value="">Select Method</option>
+                            <option value="Cash" {% if expense.payment_method=='Cash' %}selected{% endif %}>💵 Cash
+                            </option>
+                            <option value="Card" {% if expense.payment_method=='Card' %}selected{% endif %}>💳 Card
+                            </option>
+                            <option value="UPI" {% if expense.payment_method=='UPI' %}selected{% endif %}>📱 UPI
+                            </option>
+                            <option value="Other" {% if expense.payment_method=='Other' %}selected{% endif %}>🔧 Other
+                            </option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="description" class="form-label">
+                        <span class="label-icon">📄</span>
+                        Description
+                    </label>
+                    <textarea id="description" name="description" class="form-control description-textarea" rows="3"
+                        placeholder="Optional description...">{{ expense.description or '' }}</textarea>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary btn-large">
+                        <span class="btn-icon">💾</span>
+                        Update Expense
+                    </button>
+                    <a href="{{ url_for('view_expense', id=expense.id) }}" class="btn btn-outline btn-large">
+                        <span class="btn-icon">❌</span>
+                        Cancel
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Set today's date as default if no date is set
+    document.addEventListener('DOMContentLoaded', function () {
+        const dateInput = document.getElementById('date');
+        if (dateInput && !dateInput.value) {
+            dateInput.value = new Date().toISOString().split('T')[0];
+        }
+
+        // Add real-time validation for amount fields
+        const amountInput = document.getElementById('amount');
+        if (amountInput) {
+            amountInput.addEventListener('input', function () {
+                const value = parseFloat(this.value);
+                if (value < 0) {
+                    this.setCustomValidity('Amount cannot be negative');
+                } else if (value > 999999.99) {
+                    this.setCustomValidity('Amount too large');
+                } else {
+                    this.setCustomValidity('');
+                }
+            });
+        }
+    });
+</script>
+{% endblock %}

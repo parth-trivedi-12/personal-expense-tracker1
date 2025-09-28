@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+
+{% block title %}Reports - Expense Tracker{% endblock %}
+
+{% block content %}
+<div class="reports-container">
+    <div class="page-header">
+        <h1 class="page-title">📊 Expense Reports</h1>
+        <p class="page-subtitle">Comprehensive financial insights and analytics</p>
+    </div>
+
+    <!-- Financial Overview Cards -->
+    <div class="reports-overview">
+        <div class="report-card report-card-primary">
+            <div class="report-card-icon">💰</div>
+            <div class="report-card-content">
+                <h3>Total Expenses</h3>
+                <div class="report-amount">₹{{ "%.2f"|format(total_expenses) }}</div>
+                <div class="report-subtitle">This Month</div>
+            </div>
+        </div>
+
+        <div class="report-card report-card-secondary">
+            <div class="report-card-icon">🎯</div>
+            <div class="report-card-content">
+                <h3>Budget Set</h3>
+                <div class="report-amount">₹{{ "%.2f"|format(budget_amount) }}</div>
+                <div class="report-subtitle">Monthly Limit</div>
+            </div>
+        </div>
+
+        <div class="report-card report-card-{% if remaining >= 0 %}success{% else %}danger{% endif %}">
+            <div class="report-card-icon">{% if remaining >= 0 %}✅{% else %}⚠️{% endif %}</div>
+            <div class="report-card-content">
+                <h3>Remaining</h3>
+                <div class="report-amount">₹{{ "%.2f"|format(remaining) }}</div>
+                <div class="report-subtitle">{% if remaining >= 0 %}Available{% else %}Overspent{% endif %}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Budget Utilization Chart -->
+    {% if budget_amount > 0 %}
+    <div class="card budget-utilization-card">
+        <div class="card-header">
+            <h2 class="card-title">📈 Budget Utilization</h2>
+            <div class="utilization-percentage">{{ "%.1f"|format((total_expenses / budget_amount * 100)) }}%</div>
+        </div>
+        <div class="card-body">
+            <div class="progress-container">
+                <div class="progress-bar-container">
+                    <div class="progress-bar {% if total_expenses > budget_amount %}progress-bar-danger{% elif total_expenses > budget_amount * 0.8 %}progress-bar-warning{% else %}progress-bar-success{% endif %}"
+                        style="width: {{ (total_expenses / budget_amount * 100)|round(1) if (total_expenses / budget_amount * 100) <= 100 else 100 }}%">
+                    </div>
+                </div>
+                <div class="progress-labels">
+                    <span class="progress-label">0%</span>
+                    <span class="progress-label">50%</span>
+                    <span class="progress-label">100%</span>
+                </div>
+            </div>
+
+            <div class="budget-details">
+                <div class="budget-detail-item">
+                    <span class="detail-label">Spent:</span>
+                    <span class="detail-value">₹{{ "%.2f"|format(total_expenses) }}</span>
+                </div>
+                <div class="budget-detail-item">
+                    <span class="detail-label">Budget:</span>
+                    <span class="detail-value">₹{{ "%.2f"|format(budget_amount) }}</span>
+                </div>
+                <div class="budget-detail-item">
+                    <span class="detail-label">Remaining:</span>
+                    <span class="detail-value {% if remaining >= 0 %}text-success{% else %}text-danger{% endif %}">₹{{
+                        "%.2f"|format(remaining) }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Category Breakdown Chart -->
+    <div class="card category-breakdown-card">
+        <div class="card-header">
+            <h2 class="card-title">📊 Expenses by Category</h2>
+            <div class="chart-controls">
+                <button class="chart-toggle-btn active" data-chart="doughnut">Doughnut</button>
+                <button class="chart-toggle-btn" data-chart="bar">Bar</button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="chart-container">
+                <canvas id="categoryChart" width="400" height="200"></canvas>
+            </div>
+            <div class="category-legend">
+                {% for category, amount in expenses_by_category.items() %}
+                {% if amount > 0 %}
+                <div class="legend-item">
+                    <div class="legend-color"
+                        style="background-color: {{ ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6'][loop.index0 % 5] }};">
+                    </div>
+                    <span class="legend-label">{{ category }}</span>
+                    <span class="legend-value">₹{{ "%.2f"|format(amount) }}</span>
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Options -->
+    <div class="card export-card">
+        <div class="card-header">
+            <h2 class="card-title">📤 Export Reports</h2>
+            <p class="card-subtitle">Download your financial data in various formats</p>
+        </div>
+        <div class="card-body">
+            <div class="export-options">
+                <div class="export-option">
+                    <div class="export-icon">📄</div>
+                    <div class="export-content">
+                        <h3>CSV Export</h3>
+                        <p>Download your expenses as a spreadsheet for detailed analysis</p>
+                        <a href="{{ url_for('export_csv') }}" class="btn btn-primary btn-large">
+                            <span class="btn-icon">📊</span>
+                            Export CSV
+                        </a>
+                    </div>
+                </div>
+
+                <div class="export-option">
+                    <div class="export-icon">📋</div>
+                    <div class="export-content">
+                        <h3>PDF Report</h3>
+                        <p>Generate a professional PDF report with charts and insights</p>
+                        <a href="{{ url_for('export_pdf') }}" class="btn btn-secondary btn-large">
+                            <span class="btn-icon">📈</span>
+                            Export PDF
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Insights -->
+    <div class="insights-section">
+        <div class="insights-grid">
+            <div class="insight-card">
+                <div class="insight-icon">💡</div>
+                <div class="insight-content">
+                    <h3>Spending Pattern</h3>
+                    <p>{% if total_expenses > budget_amount %}You're overspending this month. Consider reviewing your
+                        expenses.{% elif total_expenses > budget_amount * 0.8 %}You're close to your budget limit.
+                        Monitor your spending.{% else %}Great job! You're well within your budget.{% endif %}</p>
+                </div>
+            </div>
+
+            <div class="insight-card">
+                <div class="insight-icon">📅</div>
+                <div class="insight-content">
+                    <h3>Monthly Average</h3>
+                    <p>Your current spending is {{ "%.1f"|format((total_expenses / budget_amount * 100)) }}% of your
+                        monthly budget.</p>
+                </div>
+            </div>
+
+            <div class="insight-card">
+                <div class="insight-icon">🎯</div>
+                <div class="insight-content">
+                    <h3>Budget Health</h3>
+                    <p>{% if remaining >= 0 %}You have ₹{{ "%.2f"|format(remaining) }} remaining in your budget.{% else
+                        %}You've exceeded your budget by ₹{{ "%.2f"|format(-remaining) }}.{% endif %}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Pass data from server to client
+    const reportsData = {
+        expensesByCategory: {{ expenses_by_category | tojson if expenses_by_category else '{}' }}
+    };
+
+    // Wait for Chart.js to be available
+    function waitForChart() {
+        if (typeof Chart !== 'undefined') {
+            initializeCharts();
+        } else {
+            setTimeout(waitForChart, 100);
+        }
+    }
+
+    function initializeCharts() {
+        // Category Breakdown Chart
+        if (Object.keys(reportsData.expensesByCategory).length > 0) {
+            const categoryCtx = document.getElementById('categoryChart');
+            if (categoryCtx) {
+                const labels = Object.keys(reportsData.expensesByCategory).filter(cat => reportsData.expensesByCategory[cat] > 0);
+                const values = labels.map(cat => reportsData.expensesByCategory[cat]);
+                const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6'];
+
+                let currentChart = new Chart(categoryCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            data: values,
+                            backgroundColor: colors.slice(0, labels.length),
+                            borderColor: '#ffffff',
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function (context) {
+                                        const value = context.parsed;
+                                        const total = values.reduce((a, b) => a + b, 0);
+                                        const percentage = ((value / total) * 100).toFixed(1);
+                                        return context.label + ': ₹' + value.toFixed(2) + ' (' + percentage + '%)';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+
+                // Chart toggle functionality
+                document.querySelectorAll('.chart-toggle-btn').forEach(btn => {
+                    btn.addEventListener('click', function () {
+                        document.querySelectorAll('.chart-toggle-btn').forEach(b => b.classList.remove('active'));
+                        this.classList.add('active');
+
+                        const chartType = this.dataset.chart;
+                        currentChart.destroy();
+
+                        currentChart = new Chart(categoryCtx, {
+                            type: chartType,
+                            data: {
+                                labels: labels,
+                                datasets: [{
+                                    label: 'Amount (₹)',
+                                    data: values,
+                                    backgroundColor: colors.slice(0, labels.length),
+                                    borderColor: '#ffffff',
+                                    borderWidth: chartType === 'bar' ? 1 : 2
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: {
+                                        display: chartType === 'bar'
+                                    },
+                                    tooltip: {
+                                        callbacks: {
+                                            label: function (context) {
+                                                return '₹' + context.parsed.y.toFixed(2);
+                                            }
+                                        }
+                                    }
+                                },
+                                scales: chartType === 'bar' ? {
+                                    y: {
+                                        beginAtZero: true,
+                                        ticks: {
+                                            callback: function (value) {
+                                                return '₹' + value.toFixed(0);
+                                            }
+                                        }
+                                    }
+                                } : {}
+                            }
+                        });
+                    });
+                });
+            }
+        }
+    }
+
+    // Start waiting for Chart.js when DOM is ready
+    document.addEventListener('DOMContentLoaded', function () {
+        waitForChart();
+    });
+</script>
+{% endblock %}

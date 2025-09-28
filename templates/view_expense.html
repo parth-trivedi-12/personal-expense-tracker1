@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}View Expense - Expense Tracker{% endblock %}
+
+{% block content %}
+<div class="view-expense-container">
+    <!-- Header Section -->
+    <div class="view-header">
+        <div class="header-content">
+            <h1 class="page-title">👁️ Expense Details</h1>
+            <p class="page-subtitle">View detailed information about this expense</p>
+        </div>
+        <div class="header-actions">
+            <a href="{{ url_for('expenses') }}" class="btn btn-outline btn-lg">
+                <span class="btn-icon">←</span>
+                Back to Expenses
+            </a>
+        </div>
+    </div>
+
+    <!-- Expense Details Card -->
+    <div class="expense-details-card">
+        <div class="expense-header">
+            <div class="expense-title-section">
+                <h2 class="expense-title">{{ expense.title }}</h2>
+                <div class="expense-amount-large">
+                    <span class="currency-symbol">₹</span>
+                    <span class="amount-value">{{ "%.2f"|format(expense.amount) }}</span>
+                </div>
+            </div>
+            <div class="expense-date-section">
+                <span class="date-label">Date</span>
+                <span class="date-value">{{ expense.date.strftime('%d %b %Y') }}</span>
+            </div>
+        </div>
+
+        <div class="expense-details-grid">
+            <div class="detail-item">
+                <div class="detail-icon">🏷️</div>
+                <div class="detail-content">
+                    <span class="detail-label">Category</span>
+                    <span class="detail-value category-badge">{{ expense.category }}</span>
+                </div>
+            </div>
+
+            <div class="detail-item">
+                <div class="detail-icon">💳</div>
+                <div class="detail-content">
+                    <span class="detail-label">Payment Method</span>
+                    <span class="detail-value payment-method">{{ expense.payment_method }}</span>
+                </div>
+            </div>
+
+            {% if expense.description %}
+            <div class="detail-item full-width">
+                <div class="detail-icon">📄</div>
+                <div class="detail-content">
+                    <span class="detail-label">Description</span>
+                    <span class="detail-value description">{{ expense.description }}</span>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="expense-meta">
+            <div class="meta-item">
+                <span class="meta-label">Created:</span>
+                <span class="meta-value">{{ expense.created_at.strftime('%d %b %Y at %I:%M %p') if expense.created_at
+                    else 'N/A' }}</span>
+            </div>
+            {% if expense.updated_at and expense.updated_at != expense.created_at %}
+            <div class="meta-item">
+                <span class="meta-label">Last Updated:</span>
+                <span class="meta-value">{{ expense.updated_at.strftime('%d %b %Y at %I:%M %p') }}</span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="action-buttons-section">
+        <div class="action-buttons">
+            <a href="{{ url_for('edit_expense', id=expense.id) }}" class="btn btn-primary btn-large">
+                <span class="btn-icon">✏️</span>
+                Edit Expense
+            </a>
+            <form action="{{ url_for('delete_expense', id=expense.id) }}" method="POST" class="delete-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <button type="submit" class="btn btn-danger btn-large">
+                    <span class="btn-icon">🗑️</span>
+                    Delete Expense
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

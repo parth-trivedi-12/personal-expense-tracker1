@@ -1,0 +1,487 @@
+{% extends "base.html" %}
+{% from "macros/forms.html" import render_field, render_submit %}
+
+{% block title %}Expenses - Expense Tracker{% endblock %}
+
+{% block content %}
+<div class="expenses-container">
+    <!-- Header Section -->
+    <div class="expenses-header">
+        <div class="header-content">
+            <h1 class="page-title">💳 Manage Expenses</h1>
+            <p class="page-subtitle">Track and manage your daily expenses with ease</p>
+        </div>
+        <div class="header-actions">
+            <a href="{{ url_for('categories') }}" class="btn btn-outline btn-lg">
+                <span class="btn-icon">🏷️</span>
+                Manage Categories
+            </a>
+        </div>
+    </div>
+
+    <!-- Add Expense Form -->
+    <div class="expense-form-card">
+        <div class="form-header">
+            <h2 class="form-title">➕ Add New Expense</h2>
+            <p class="form-subtitle">Record your latest expense quickly and easily</p>
+        </div>
+        <div class="form-body">
+            <form method="POST" class="expense-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="title" class="form-label">
+                            <span class="label-icon">📝</span>
+                            Expense Title
+                            <span class="required">*</span>
+                        </label>
+                        <input type="text" id="title" name="title" class="form-control"
+                            placeholder="e.g., Grocery Shopping" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="amount" class="form-label">
+                            <span class="label-icon">💰</span>
+                            Amount
+                            <span class="required">*</span>
+                        </label>
+                        <div class="amount-input-group">
+                            <div class="currency-symbol">₹</div>
+                            <input type="number" id="amount" name="amount" class="form-control amount-input"
+                                placeholder="0.00" step="0.01" min="0" max="999999.99" required>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="date" class="form-label">
+                            <span class="label-icon">📅</span>
+                            Date
+                            <span class="required">*</span>
+                        </label>
+                        <input type="date" id="date" name="date" class="form-control" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="category" class="form-label">
+                            <span class="label-icon">🏷️</span>
+                            Category
+                            <span class="required">*</span>
+                        </label>
+                        <select id="category" name="category" class="form-control category-select" required>
+                            <option value="">Select Category</option>
+                            {% for category in user_categories %}
+                            <option value="{{ category.name }}" data-color="{{ category.color }}"
+                                data-icon="{{ category.icon }}">
+                                {{ category.icon }} {{ category.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-help">
+                            <a href="{{ url_for('categories') }}" class="help-link">
+                                <span class="help-icon">⚙️</span>
+                                Manage Categories
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="payment_method" class="form-label">
+                            <span class="label-icon">💳</span>
+                            Payment Method
+                            <span class="required">*</span>
+                        </label>
+                        <select id="payment_method" name="payment_method" class="form-control" required>
+                            <option value="">Select Method</option>
+                            <option value="Cash">💵 Cash</option>
+                            <option value="Card">💳 Card</option>
+                            <option value="UPI">📱 UPI</option>
+                            <option value="Other">🔧 Other</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="description" class="form-label">
+                        <span class="label-icon">📄</span>
+                        Description
+                    </label>
+                    <textarea id="description" name="description" class="form-control description-textarea" rows="3"
+                        placeholder="Optional description..."></textarea>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary btn-large">
+                        <span class="btn-icon">➕</span>
+                        Add Expense
+                    </button>
+                    <button type="reset" class="btn btn-outline btn-large">
+                        <span class="btn-icon">🔄</span>
+                        Clear Form
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Filter Section -->
+    <div class="filter-section">
+        <div class="filter-card">
+            <div class="filter-header">
+                <h3 class="filter-title">🔍 Filter & Search</h3>
+                {% if selected_category != 'All' or search_term %}
+                <div class="active-filters">
+                    <span class="filter-badge">Active Filters:</span>
+                    {% if selected_category != 'All' %}
+                    <span class="filter-tag">
+                        <span class="tag-icon">🏷️</span>
+                        {{ selected_category }}
+                        <button type="button" onclick="clearCategoryFilter()" class="tag-remove">×</button>
+                    </span>
+                    {% endif %}
+                    {% if search_term %}
+                    <span class="filter-tag">
+                        <span class="tag-icon">🔍</span>
+                        "{{ search_term }}"
+                        <button type="button" onclick="clearSearchFilter()" class="tag-remove">×</button>
+                    </span>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+
+            <form method="GET" id="filterForm" class="filter-form">
+                <div class="filter-row">
+                    <div class="filter-group">
+                        <label for="categoryFilter" class="filter-label">
+                            <span class="filter-icon">🏷️</span>
+                            Category
+                        </label>
+                        <select id="categoryFilter" name="category" class="filter-select">
+                            <option value="All" {% if selected_category=='All' %}selected{% endif %}>All Categories
+                            </option>
+                            {% for category in user_categories %}
+                            <option value="{{ category.name }}" {% if selected_category==category.name %}selected{%
+                                endif %}>
+                                {{ category.icon }} {{ category.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="filter-group">
+                        <label for="searchInput" class="filter-label">
+                            <span class="filter-icon">🔍</span>
+                            Search
+                        </label>
+                        <input type="text" id="searchInput" name="search" placeholder="Search expenses..."
+                            class="filter-input" value="{{ search_term }}">
+                    </div>
+
+                    <div class="filter-actions">
+                        <button type="submit" class="btn btn-primary">
+                            <span class="btn-icon">🔍</span>
+                            Apply Filters
+                        </button>
+                        <button type="button" class="btn btn-outline" onclick="clearFilters()">
+                            <span class="btn-icon">🔄</span>
+                            Clear All
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Expenses Table -->
+    <div class="expenses-table-card">
+        <div class="table-header">
+            <h2 class="table-title">📋 Expense History</h2>
+            <div class="table-stats">
+                <span class="expense-count">{{ expenses|length }} expenses</span>
+            </div>
+        </div>
+        <div class="table-body">
+            {% if expenses %}
+            <div class="table-container">
+                <table class="expenses-table">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Amount</th>
+                            <th>Date</th>
+                            <th>Category</th>
+                            <th>Payment</th>
+                            <th>Description</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for expense in expenses %}
+                        <tr class="expense-row">
+                            <td class="expense-title">
+                                <div class="title-content">
+                                    <span class="title-text">{{ expense.title }}</span>
+                                </div>
+                            </td>
+                            <td class="expense-amount">
+                                <span class="amount-value">₹{{ "%.2f"|format(expense.amount) }}</span>
+                            </td>
+                            <td class="expense-date">
+                                <span class="date-text">{{ expense.date.strftime('%d %b %Y') }}</span>
+                            </td>
+                            <td class="expense-category">
+                                {% for category in user_categories %}
+                                {% if category.name == expense.category %}
+                                <span class="category-badge"
+                                    style="background-color: {{ category.color }}20; color: {{ category.color }}; border: 1px solid {{ category.color }}40;">
+                                    <span class="category-icon">{{ category.icon }}</span>
+                                    <span class="category-name">{{ expense.category }}</span>
+                                </span>
+                                {% endif %}
+                                {% endfor %}
+                            </td>
+                            <td class="expense-payment">
+                                <span class="payment-method">{{ expense.payment_method }}</span>
+                            </td>
+                            <td class="expense-description">
+                                <span class="description-text">
+                                    {{ expense.description[:50] }}{% if expense.description|length > 50 %}...{% endif %}
+                                </span>
+                            </td>
+                            <td class="expense-actions">
+                                <div class="action-buttons">
+                                    <a href="{{ url_for('view_expense', id=expense.id) }}" class="action-btn view-btn"
+                                        title="View Details">
+                                        <span class="btn-icon">👁️</span>
+                                    </a>
+                                    <a href="{{ url_for('edit_expense', id=expense.id) }}" class="action-btn edit-btn"
+                                        title="Edit Expense">
+                                        <span class="btn-icon">✏️</span>
+                                    </a>
+                                    <form action="{{ url_for('delete_expense', id=expense.id) }}" method="POST"
+                                        class="delete-form">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                                        <button type="submit" class="action-btn delete-btn" title="Delete Expense">
+                                            <span class="btn-icon">🗑️</span>
+                                        </button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="empty-icon">💳</div>
+                <h3>No expenses found</h3>
+                <p>{% if search_term or selected_category != 'All' %}No expenses match your current filters. Try
+                    adjusting your search criteria.{% else %}Start by adding your first expense using the form above.{%
+                    endif %}</p>
+                {% if search_term or selected_category != 'All' %}
+                <button type="button" class="btn btn-outline" onclick="clearFilters()">
+                    <span class="btn-icon">🔄</span>
+                    Clear Filters
+                </button>
+                {% else %}
+                <a href="#title" class="btn btn-primary">
+                    <span class="btn-icon">➕</span>
+                    Add Expense
+                </a>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Category Breakdown Chart -->
+    {% if expenses_by_category %}
+    <div class="chart-section">
+        <div class="chart-card">
+            <div class="chart-header">
+                <h2 class="chart-title">📊 Expenses by Category</h2>
+                <div class="chart-controls">
+                    <button class="chart-toggle active" data-chart="doughnut">Doughnut</button>
+                    <button class="chart-toggle" data-chart="bar">Bar</button>
+                </div>
+            </div>
+            <div class="chart-body">
+                <div class="chart-wrapper">
+                    <canvas id="categoryChart"></canvas>
+                </div>
+                <div class="category-legend">
+                    {% for category, amount in expenses_by_category.items() %}
+                    {% if amount > 0 %}
+                    <div class="legend-item">
+                        <div class="legend-color"
+                            style="background-color: {{ ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6'][loop.index0 % 5] }};">
+                        </div>
+                        <span class="legend-label">{{ category }}</span>
+                        <span class="legend-value">₹{{ "%.2f"|format(amount) }}</span>
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Pass data from server to client - clean separation
+    const expenseData = {
+        expensesByCategory: {{ expenses_by_category | tojson if expenses_by_category else '{}' }}
+    };
+
+    // Wait for Chart.js to be available
+    function waitForChart() {
+        if (typeof Chart !== 'undefined') {
+            initializeCharts();
+        } else {
+            setTimeout(waitForChart, 100);
+        }
+    }
+
+    let categoryChart = null;
+
+    function initializeCharts() {
+        // Set today's date as default
+        const dateInput = document.getElementById('date');
+        if (dateInput && !dateInput.value) {
+            dateInput.value = new Date().toISOString().split('T')[0];
+        }
+
+        // No real-time search - filters only apply on form submission
+
+        // Initialize chart with default type (doughnut)
+        createCategoryChart('doughnut');
+
+        // Add event listeners for chart toggle buttons
+        const chartToggles = document.querySelectorAll('.chart-toggle');
+        chartToggles.forEach(button => {
+            button.addEventListener('click', function () {
+                const chartType = this.getAttribute('data-chart');
+
+                // Update button states
+                chartToggles.forEach(btn => btn.classList.remove('active'));
+                this.classList.add('active');
+
+                // Recreate chart with new type
+                createCategoryChart(chartType);
+            });
+        });
+    }
+
+    function createCategoryChart(type) {
+        // Destroy existing chart if it exists
+        if (categoryChart) {
+            categoryChart.destroy();
+        }
+
+        // Category Breakdown Chart
+        if (Object.keys(expenseData.expensesByCategory).length > 0) {
+            const categoryCtx = document.getElementById('categoryChart');
+            if (categoryCtx) {
+                const labels = Object.keys(expenseData.expensesByCategory);
+                const values = Object.values(expenseData.expensesByCategory);
+
+                const chartConfig = {
+                    type: type,
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            data: values,
+                            backgroundColor: [
+                                '#3b82f6',
+                                '#22c55e',
+                                '#f59e0b',
+                                '#ef4444',
+                                '#8b5cf6'
+                            ],
+                            borderColor: '#ffffff',
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom',
+                                labels: {
+                                    padding: 20,
+                                    usePointStyle: true
+                                }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function (context) {
+                                        const value = context.parsed;
+                                        const total = values.reduce((a, b) => a + b, 0);
+                                        const percentage = ((value / total) * 100).toFixed(1);
+                                        return context.label + ': ₹' + value.toFixed(2) + ' (' + percentage + '%)';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+
+                // Add specific options for bar chart
+                if (type === 'bar') {
+                    chartConfig.options.scales = {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function (value) {
+                                    return '₹' + value.toFixed(2);
+                                }
+                            }
+                        }
+                    };
+                }
+
+                categoryChart = new Chart(categoryCtx, chartConfig);
+            }
+        }
+    }
+
+    // Start waiting for Chart.js when DOM is ready
+    document.addEventListener('DOMContentLoaded', function () {
+        waitForChart();
+    });
+
+    // Global functions for onclick handlers
+    function clearFilters() {
+        // Redirect to expenses page without any filters
+        window.location.href = '{{ url_for("expenses") }}';
+    }
+
+    function clearCategoryFilter() {
+        // Clear only category filter, keep search
+        const searchTerm = document.getElementById('searchInput').value;
+        const url = new URL('{{ url_for("expenses") }}', window.location.origin);
+        if (searchTerm) {
+            url.searchParams.set('search', searchTerm);
+        }
+        window.location.href = url.toString();
+    }
+
+    function clearSearchFilter() {
+        // Clear only search filter, keep category
+        const category = document.getElementById('categoryFilter').value;
+        const url = new URL('{{ url_for("expenses") }}', window.location.origin);
+        if (category && category !== 'All') {
+            url.searchParams.set('category', category);
+        }
+        window.location.href = url.toString();
+    }
+</script>
+{% endblock %}

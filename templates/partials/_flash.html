@@ -1,0 +1,24 @@
+<!-- Flash Messages Partial -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="flash-container">
+    {% for category, message in messages %}
+    <div class="alert alert-{{ category }} alert-dismissible" role="alert">
+        <div class="alert-content">
+            <span class="alert-icon">
+                {% if category == 'success' %}✅
+                {% elif category == 'danger' %}❌
+                {% elif category == 'warning' %}⚠️
+                {% elif category == 'info' %}ℹ️
+                {% else %}📢{% endif %}
+            </span>
+            <span class="alert-message">{{ message }}</span>
+            <button type="button" class="alert-close" onclick="dismissAlert(this)" aria-label="Close">
+                <span>&times;</span>
+            </button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endwith %}

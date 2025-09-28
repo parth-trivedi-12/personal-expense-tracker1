@@ -1,0 +1,96 @@
+<!-- Form Macros -->
+{% macro render_field(field, label=None, help=None, prefix=None, suffix=None, required=False, class="form-control") %}
+<div class="form-group">
+    {% if label %}
+    <label for="{{ field.id }}" class="form-label">
+        {{ label }}
+        {% if required %}<span class="required">*</span>{% endif %}
+    </label>
+    {% endif %}
+
+    <div class="input-group">
+        {% if prefix %}
+        <div class="input-prefix">{{ prefix }}</div>
+        {% endif %}
+
+        {{ field(class=class, **kwargs) }}
+
+        {% if suffix %}
+        <div class="input-suffix">{{ suffix }}</div>
+        {% endif %}
+    </div>
+
+    {% if help %}
+    <div class="form-help">{{ help }}</div>
+    {% endif %}
+
+    {% if field.errors %}
+    <div class="form-errors">
+        {% for error in field.errors %}
+        <div class="error-message">{{ error }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% macro render_select(field, label=None, help=None, required=False, class="form-control") %}
+<div class="form-group">
+    {% if label %}
+    <label for="{{ field.id }}" class="form-label">
+        {{ label }}
+        {% if required %}<span class="required">*</span>{% endif %}
+    </label>
+    {% endif %}
+
+    {{ field(class=class, **kwargs) }}
+
+    {% if help %}
+    <div class="form-help">{{ help }}</div>
+    {% endif %}
+
+    {% if field.errors %}
+    <div class="form-errors">
+        {% for error in field.errors %}
+        <div class="error-message">{{ error }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% macro render_textarea(field, label=None, help=None, required=False, class="form-control", rows=3) %}
+<div class="form-group">
+    {% if label %}
+    <label for="{{ field.id }}" class="form-label">
+        {{ label }}
+        {% if required %}<span class="required">*</span>{% endif %}
+    </label>
+    {% endif %}
+
+    {{ field(class=class, rows=rows, **kwargs) }}
+
+    {% if help %}
+    <div class="form-help">{{ help }}</div>
+    {% endif %}
+
+    {% if field.errors %}
+    <div class="form-errors">
+        {% for error in field.errors %}
+        <div class="error-message">{{ error }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% macro render_button(text, type="submit", class="btn btn-primary", icon=None) %}
+<button type="{{ type }}" class="{{ class }}">
+    {% if icon %}<span class="btn-icon">{{ icon }}</span>{% endif %}
+    <span class="btn-text">{{ text }}</span>
+</button>
+{% endmacro %}
+
+{% macro render_submit(text="Submit", class="btn btn-primary", icon=None) %}
+{{ render_button(text, "submit", class, icon) }}
+{% endmacro %}

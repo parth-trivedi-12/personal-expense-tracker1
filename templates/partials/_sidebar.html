@@ -1,0 +1,53 @@
+<!-- Sidebar Navigation Partial -->
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-content">
+        <nav class="sidebar-nav">
+            <ul class="nav-list">
+                <li class="nav-item">
+                    <a href="{{ url_for('dashboard') }}"
+                        class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}">
+                        <span class="nav-icon">📊</span>
+                        <span class="nav-text">Dashboard</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="{{ url_for('expenses') }}"
+                        class="nav-link {% if request.endpoint in ['expenses', 'view_expense', 'edit_expense'] %}active{% endif %}">
+                        <span class="nav-icon">💳</span>
+                        <span class="nav-text">Expenses</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="{{ url_for('categories') }}"
+                        class="nav-link {% if request.endpoint == 'categories' %}active{% endif %}">
+                        <span class="nav-icon">🏷️</span>
+                        <span class="nav-text">Categories</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="{{ url_for('budget') }}"
+                        class="nav-link {% if request.endpoint == 'budget' %}active{% endif %}">
+                        <span class="nav-icon">💰</span>
+                        <span class="nav-text">Budget</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="{{ url_for('reports') }}"
+                        class="nav-link {% if request.endpoint == 'reports' %}active{% endif %}">
+                        <span class="nav-icon">📈</span>
+                        <span class="nav-text">Reports</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="sidebar-stats">
+                <div class="stat-item">
+                    <span class="stat-label">This Month</span>
+                    <span class="stat-value" id="monthlyTotal">₹0</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</aside>

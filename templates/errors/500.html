@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Server Error - Expense Tracker{% endblock %}
+
+{% block content %}
+<div class="error-container">
+    <div class="error-content">
+        <div class="error-icon">🚨</div>
+        <h1 class="error-title">500 - Server Error</h1>
+        <p class="error-message">Something went wrong on our end. We're working to fix it!</p>
+        <div class="error-actions">
+            <a href="{{ url_for('dashboard') if session.get('user_id') else url_for('home') }}" class="btn btn-primary">
+                <span class="btn-icon">🏠</span>
+                Go to Dashboard
+            </a>
+            <button onclick="location.reload()" class="btn btn-outline">
+                <span class="btn-icon">🔄</span>
+                Try Again
+            </button>
+        </div>
+    </div>
+</div>
+
+<style>
+    .error-container {
+        min-height: 60vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--space-6);
+    }
+
+    .error-content {
+        text-align: center;
+        max-width: 500px;
+    }
+
+    .error-icon {
+        font-size: var(--font-size-4xl);
+        margin-bottom: var(--space-4);
+    }
+
+    .error-title {
+        font-size: var(--font-size-3xl);
+        font-weight: var(--font-weight-bold);
+        color: var(--text-primary);
+        margin-bottom: var(--space-4);
+    }
+
+    .error-message {
+        font-size: var(--font-size-lg);
+        color: var(--text-secondary);
+        margin-bottom: var(--space-8);
+    }
+
+    .error-actions {
+        display: flex;
+        gap: var(--space-4);
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+</style>
+{% endblock %}

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% from "macros/forms.html" import render_field, render_submit %}
+
+{% block title %}Register - Expense Tracker{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        <div class="auth-header">
+            <div class="brand-icon">💰</div>
+            <h1 class="auth-title">Create Account</h1>
+            <p class="auth-subtitle">Join us to start tracking your expenses</p>
+        </div>
+
+        <form method="POST" class="auth-form" id="registerForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+            <div class="form-group">
+                <label for="username" class="form-label">Username <span class="required">*</span></label>
+                <input type="text" id="username" name="username" class="form-control" placeholder="Enter your username"
+                    required minlength="3" maxlength="50">
+                <div class="form-help">3-50 characters, letters and numbers only</div>
+            </div>
+
+            <div class="form-group">
+                <label for="email" class="form-label">Email Address <span class="required">*</span></label>
+                <input type="email" id="email" name="email" class="form-control" placeholder="Enter your email"
+                    required>
+                <div class="form-help">We'll never share your email</div>
+            </div>
+
+            <div class="form-group">
+                <label for="password" class="form-label">Password <span class="required">*</span></label>
+                <div class="input-group">
+                    <input type="password" id="password" name="password" class="form-control"
+                        placeholder="Create a strong password" required minlength="8">
+                    <button type="button" class="input-suffix password-toggle" onclick="togglePassword()" tabindex="-1">
+                        <span class="toggle-icon">👁️</span>
+                    </button>
+                </div>
+                <div class="form-help">At least 8 characters with uppercase, lowercase, and numbers</div>
+            </div>
+
+            <div class="form-group">
+                {{ render_submit("Create Account", "btn btn-primary btn-full", "🚀") }}
+            </div>
+        </form>
+
+        <div class="auth-footer">
+            <p class="auth-footer-text">
+                Already have an account?
+                <a href="{{ url_for('login') }}" class="auth-link">Sign in here</a>
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+    function togglePassword() {
+        const passwordInput = document.getElementById('password');
+        const toggleIcon = document.querySelector('.toggle-icon');
+
+        if (passwordInput.type === 'password') {
+            passwordInput.type = 'text';
+            toggleIcon.textContent = '🙈';
+        } else {
+            passwordInput.type = 'password';
+            toggleIcon.textContent = '👁️';
+        }
+    }
+
+    // Form submission with loading state
+    document.getElementById('registerForm').addEventListener('submit', function () {
+        const submitBtn = this.querySelector('.btn-primary');
+        const btnText = submitBtn.querySelector('.btn-text');
+        const btnIcon = submitBtn.querySelector('.btn-icon');
+
+        submitBtn.disabled = true;
+        btnText.textContent = 'Creating Account...';
+        btnIcon.textContent = '⏳';
+    });
+
+    // Password strength validation
+    document.getElementById('password').addEventListener('input', function () {
+        const password = this.value;
+        const hasUpper = /[A-Z]/.test(password);
+        const hasLower = /[a-z]/.test(password);
+        const hasNumber = /\d/.test(password);
+        const hasLength = password.length >= 8;
+
+        if (hasUpper && hasLower && hasNumber && hasLength) {
+            this.setCustomValidity('');
+        } else {
+            this.setCustomValidity('Password must be at least 8 characters with uppercase, lowercase, and numbers');
+        }
+    });
+</script>
+{% endblock %}
