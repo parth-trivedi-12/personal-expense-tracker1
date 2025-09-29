@@ -1096,36 +1096,61 @@ def budget():
 def reports():
     user_id = session["user_id"]
     
+    # Ensure database is ready on Vercel
+    if os.environ.get('VERCEL'):
+        ensure_database_ready()
+    
     try:
-        expenses = Expense.query.filter_by(user_id=user_id).all()
-        total_expenses = sum([e.amount for e in expenses])
-        budget = Budget.query.filter_by(user_id=user_id).first()
-        budget_amount = budget.amount if budget else 0
+        # Get expenses with error handling
+        try:
+            expenses = Expense.query.filter_by(user_id=user_id).all()
+            total_expenses = sum([e.amount for e in expenses]) if expenses else 0
+        except Exception as e:
+            print(f"Error fetching expenses: {e}")
+            expenses = []
+            total_expenses = 0
+        
+        # Get budget with error handling
+        try:
+            budget = Budget.query.filter_by(user_id=user_id).first()
+            budget_amount = budget.amount if budget else 0
+        except Exception as e:
+            print(f"Error fetching budget: {e}")
+            budget_amount = 0
+        
         remaining = budget_amount - total_expenses
         
         # Get user's categories for expenses by category
-        user_categories = Category.query.filter_by(user_id=user_id).all()
-        if not user_categories:
-            # Create default categories if none exist
-            default_categories = [
-                {"name": "Food", "color": "#ef4444", "icon": "🍕"},
-                {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
-                {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
-                {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
-                {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
-            ]
-            
-            for cat_data in default_categories:
-                category = Category(
-                    user_id=user_id,
-                    name=cat_data["name"],
-                    color=cat_data["color"],
-                    icon=cat_data["icon"]
-                )
-                db.session.add(category)
-            
-            db.session.commit()
+        try:
             user_categories = Category.query.filter_by(user_id=user_id).all()
+            if not user_categories:
+                # Create default categories if none exist
+                default_categories = [
+                    {"name": "Food", "color": "#ef4444", "icon": "🍕"},
+                    {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
+                    {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
+                    {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
+                    {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
+                ]
+                
+                for cat_data in default_categories:
+                    category = Category(
+                        user_id=user_id,
+                        name=cat_data["name"],
+                        color=cat_data["color"],
+                        icon=cat_data["icon"]
+                    )
+                    db.session.add(category)
+                
+                try:
+                    db.session.commit()
+                    user_categories = Category.query.filter_by(user_id=user_id).all()
+                except Exception as e:
+                    print(f"Error creating categories: {e}")
+                    user_categories = []
+        except Exception as e:
+            print(f"Error fetching categories: {e}")
+            user_categories = []
         
         # Calculate expenses by category
         expenses_by_category = {cat.name: 0 for cat in user_categories}
@@ -1140,6 +1165,7 @@ def reports():
                              expenses_by_category=expenses_by_category)
                              
     except Exception as e:
+        print(f"Error generating reports: {str(e)}")
         app.logger.error(f"Error generating reports: {str(e)}")
         flash("An error occurred while generating reports. Please try again.", "danger")
         return redirect(url_for("dashboard"))
@@ -2228,6 +2254,43 @@ def test_admin():
                 """
         else:
             return "This endpoint only works on Vercel"
+    except Exception as e:
+        return f"Test error: {str(e)}"
+
+@app.route("/test-reports")
+def test_reports():
+    """Test reports page functionality"""
+    try:
+        if "user_id" not in session:
+            return "No session found. Please <a href='/login'>login</a> first."
+        
+        # Ensure database is ready on Vercel
+        if os.environ.get('VERCEL'):
+            ensure_database_ready()
+        
+        user_id = session["user_id"]
+        
+        # Test database queries
+        try:
+            expenses = Expense.query.filter_by(user_id=user_id).all()
+            total_expenses = sum([e.amount for e in expenses]) if expenses else 0
+            budget = Budget.query.filter_by(user_id=user_id).first()
+            budget_amount = budget.amount if budget else 0
+            categories = Category.query.filter_by(user_id=user_id).all()
+            
+            return f"""
+            <h2>Reports Test Successful!</h2>
+            <p><strong>User ID:</strong> {user_id}</p>
+            <p><strong>Total Expenses:</strong> {total_expenses}</p>
+            <p><strong>Budget Amount:</strong> {budget_amount}</p>
+            <p><strong>Categories:</strong> {len(categories)}</p>
+            <p><strong>Remaining Budget:</strong> {budget_amount - total_expenses}</p>
+            
+            <p><a href="/reports">Go to Reports</a></p>
+            <p><a href="/dashboard">Go to Dashboard</a></p>
+            """
+        except Exception as e:
+            return f"Database error: {str(e)}"
     except Exception as e:
         return f"Test error: {str(e)}"
 
