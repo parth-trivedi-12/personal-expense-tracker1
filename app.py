@@ -386,9 +386,13 @@ def before_request():
     if os.environ.get('VERCEL'):
         ensure_database_ready()
     
-    # Clear all flash messages to prevent session errors from showing
+    # AGGRESSIVELY clear all flash messages to prevent session errors from showing
     if '_flashes' in session:
         session.pop('_flashes', None)
+    
+    # Clear any session-related flash messages
+    if hasattr(session, '_flashes'):
+        session._flashes = []
 
 # ----------------- Routes -----------------
 @app.route("/")
@@ -562,6 +566,12 @@ def clear_flashes():
     if '_flashes' in session:
         session.pop('_flashes', None)
     return redirect(url_for("dashboard"))
+
+@app.route("/force-clear")
+def force_clear():
+    """Force clear everything and redirect to home"""
+    session.clear()
+    return redirect(url_for("home"))
 
 # ----------------- Dashboard -----------------
 @app.route("/dashboard")
@@ -1541,7 +1551,7 @@ def delete_account():
 @admin_required
 def admin_dashboard():
     """Admin dashboard with system statistics"""
-    user_id = session.get("user_id", 1)  # Default to 1 if not found
+    user_id = session.get("user_id", 1)  # Default to 1 if not foundimage.png
     
     try:
         # Ensure database is ready and synced on Vercel
