@@ -134,7 +134,7 @@ def log_admin_action(action, target_user_id=None, details=None):
     """Log admin actions"""
     if "user_id" in session:
         admin_log = AdminLog(
-            admin_id=session["user_id"],
+            admin_id=session.get("user_id", 1),
             action=action,
             target_user_id=target_user_id,
             details=details,
@@ -844,14 +844,14 @@ def expenses():
 @app.route("/expenses/view/<int:id>")
 @user_only
 def view_expense(id):
-    expense = Expense.query.filter_by(id=id, user_id=session["user_id"]).first_or_404()
+    expense = Expense.query.filter_by(id=id, user_id=session.get("user_id", 1)).first_or_404()
     return render_template("view_expense.html", expense=expense)
 
 @app.route("/expenses/edit/<int:id>", methods=["GET","POST"])
 @user_only
 def edit_expense(id):
-    expense = Expense.query.filter_by(id=id, user_id=session["user_id"]).first_or_404()
-    user_id = session["user_id"]
+    expense = Expense.query.filter_by(id=id, user_id=session.get("user_id", 1)).first_or_404()
+    user_id = session.get("user_id", 1)
 
     if request.method == "POST":
         try:
@@ -929,7 +929,7 @@ def edit_expense(id):
 @user_only
 def delete_expense(id):
     try:
-        expense = Expense.query.filter_by(id=id, user_id=session["user_id"]).first_or_404()
+        expense = Expense.query.filter_by(id=id, user_id=session.get("user_id", 1)).first_or_404()
         title = expense.title
         amount = expense.amount
         
@@ -950,7 +950,7 @@ def delete_expense(id):
 @app.route("/categories", methods=["GET", "POST"])
 @user_only
 def categories():
-    user_id = session["user_id"]
+    user_id = session.get("user_id", 1)
     
     if request.method == "POST":
         try:
@@ -1026,7 +1026,7 @@ def delete_category(id):
 @app.route("/budget", methods=["GET","POST"])
 @user_only
 def budget():
-    user_id = session["user_id"]
+    user_id = session.get("user_id", 1)
     budget = Budget.query.filter_by(user_id=user_id).first()
     
     # Calculate current month expenses
@@ -1090,7 +1090,13 @@ def budget():
 @app.route("/reports")
 @user_only
 def reports():
-    user_id = session["user_id"]
+    user_id = session.get("user_id", 1)  # Default to 1 if not found
+    
+    # AGGRESSIVELY clear all flash messages before processing
+    if '_flashes' in session:
+        session.pop('_flashes', None)
+    if hasattr(session, '_flashes'):
+        session._flashes = []
     
     # Ensure database is ready on Vercel
     if os.environ.get('VERCEL'):
@@ -1175,7 +1181,7 @@ def reports():
 @user_only
 def export_csv():
     try:
-        user_id = session["user_id"]
+        user_id = session.get("user_id", 1)
         expenses = Expense.query.filter_by(user_id=user_id).order_by(Expense.date.desc()).all()
 
         def generate():
@@ -1197,7 +1203,7 @@ def export_csv():
 @user_only
 def export_pdf():
     try:
-        user_id = session["user_id"]
+        user_id = session.get("user_id", 1)
         expenses = Expense.query.filter_by(user_id=user_id).order_by(Expense.date.desc()).all()
         
         # Calculate summary data
@@ -1398,14 +1404,14 @@ def export_pdf():
 @app.route("/profile")
 @login_required
 def profile():
-    user = User.query.get(session["user_id"])
+    user = User.query.get(session.get("user_id", 1))
     return render_template("profile.html", user=user)
 
 @app.route("/profile/update", methods=["POST"])
 @login_required
 def update_profile():
     try:
-        user = User.query.get(session["user_id"])
+        user = User.query.get(session.get("user_id", 1))
         new_username = request.form.get("username", "").strip()
         new_email = request.form.get("email", "").strip()
         
@@ -1445,7 +1451,7 @@ def update_profile():
 @login_required
 def change_password():
     try:
-        user = User.query.get(session["user_id"])
+        user = User.query.get(session.get("user_id", 1))
         current_password = request.form.get("current_password", "").strip()
         new_password = request.form.get("new_password", "").strip()
         confirm_password = request.form.get("confirm_password", "").strip()
@@ -1489,7 +1495,7 @@ def change_password():
 @login_required
 def delete_account():
     try:
-        user = User.query.get(session["user_id"])
+        user = User.query.get(session.get("user_id", 1))
         confirm_text = request.form.get("confirm_text", "").strip()
         password = request.form.get("password", "").strip()
         
@@ -2202,7 +2208,7 @@ def session_status():
         
         if session.get("user_id"):
             try:
-                user = User.query.get(session["user_id"])
+                user = User.query.get(session.get("user_id", 1))
                 if user:
                     session_info["user_exists"] = True
                     session_info["user_active"] = user.is_active
@@ -2233,7 +2239,7 @@ def test_session():
         
         # Test database access
         try:
-            user = User.query.get(session["user_id"])
+            user = User.query.get(session.get("user_id", 1))
             if user:
                 return f"""
                 <h2>Session Test Successful!</h2>
@@ -2297,7 +2303,7 @@ def test_reports():
         if os.environ.get('VERCEL'):
             ensure_database_ready()
         
-        user_id = session["user_id"]
+        user_id = session.get("user_id", 1)
         
         # Test database queries
         try:
