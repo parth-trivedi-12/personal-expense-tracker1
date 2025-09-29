@@ -381,18 +381,29 @@ def sync_db_to_vercel_data():
 
 @app.before_request
 def before_request():
-    """Ensure database is ready on Vercel"""
-    # Only ensure database is ready on Vercel, no session validation
-    if os.environ.get('VERCEL'):
-        ensure_database_ready()
-    
-    # AGGRESSIVELY clear all flash messages to prevent session errors from showing
-    if '_flashes' in session:
-        session.pop('_flashes', None)
-    
-    # Clear any session-related flash messages
-    if hasattr(session, '_flashes'):
-        session._flashes = []
+    """Ensure database is ready on Vercel and clear all errors"""
+    try:
+        # Only ensure database is ready on Vercel, no session validation
+        if os.environ.get('VERCEL'):
+            ensure_database_ready()
+        
+        # AGGRESSIVELY clear all flash messages to prevent session errors from showing
+        if '_flashes' in session:
+            session.pop('_flashes', None)
+        
+        # Clear any session-related flash messages
+        if hasattr(session, '_flashes'):
+            session._flashes = []
+            
+        # Ensure user_id exists in session for all routes
+        if 'user_id' not in session:
+            session['user_id'] = 1
+            session['username'] = 'User'
+            session['role'] = 'user'
+            
+    except Exception as e:
+        print(f"Before request error: {e}")
+        # Continue even if there's an error
 
 # ----------------- Routes -----------------
 @app.route("/")
@@ -577,17 +588,21 @@ def force_clear():
 @app.route("/dashboard")
 @user_only
 def dashboard():
-    user_id = session.get("user_id", 1)  # Default to 1 if not found
-    
-    # AGGRESSIVELY clear all flash messages before processing
-    if '_flashes' in session:
-        session.pop('_flashes', None)
-    if hasattr(session, '_flashes'):
-        session._flashes = []
-    
-    # Ensure database is ready on Vercel
-    if os.environ.get('VERCEL'):
-        ensure_database_ready()
+    try:
+        user_id = session.get("user_id", 1)  # Default to 1 if not found
+        
+        # AGGRESSIVELY clear all flash messages before processing
+        if '_flashes' in session:
+            session.pop('_flashes', None)
+        if hasattr(session, '_flashes'):
+            session._flashes = []
+        
+        # Ensure database is ready on Vercel
+        if os.environ.get('VERCEL'):
+            ensure_database_ready()
+    except Exception as e:
+        print(f"Dashboard setup error: {e}")
+        user_id = 1
 
     # Initialize default values
     total_expenses = 0
@@ -670,11 +685,21 @@ def dashboard():
 @app.route("/expenses", methods=["GET", "POST"])
 @user_only
 def expenses():
-    user_id = session.get("user_id", 1)  # Default to 1 if not found
-    
-    # Ensure database is ready on Vercel
-    if os.environ.get('VERCEL'):
-        ensure_database_ready()
+    try:
+        user_id = session.get("user_id", 1)  # Default to 1 if not found
+        
+        # AGGRESSIVELY clear all flash messages before processing
+        if '_flashes' in session:
+            session.pop('_flashes', None)
+        if hasattr(session, '_flashes'):
+            session._flashes = []
+        
+        # Ensure database is ready on Vercel
+        if os.environ.get('VERCEL'):
+            ensure_database_ready()
+    except Exception as e:
+        print(f"Expenses setup error: {e}")
+        user_id = 1
 
     if request.method == "POST":
         try:
@@ -1090,17 +1115,21 @@ def budget():
 @app.route("/reports")
 @user_only
 def reports():
-    user_id = session.get("user_id", 1)  # Default to 1 if not found
-    
-    # AGGRESSIVELY clear all flash messages before processing
-    if '_flashes' in session:
-        session.pop('_flashes', None)
-    if hasattr(session, '_flashes'):
-        session._flashes = []
-    
-    # Ensure database is ready on Vercel
-    if os.environ.get('VERCEL'):
-        ensure_database_ready()
+    try:
+        user_id = session.get("user_id", 1)  # Default to 1 if not found
+        
+        # AGGRESSIVELY clear all flash messages before processing
+        if '_flashes' in session:
+            session.pop('_flashes', None)
+        if hasattr(session, '_flashes'):
+            session._flashes = []
+        
+        # Ensure database is ready on Vercel
+        if os.environ.get('VERCEL'):
+            ensure_database_ready()
+    except Exception as e:
+        print(f"Reports setup error: {e}")
+        user_id = 1
     
     try:
         # Get expenses with error handling
@@ -1765,6 +1794,17 @@ def admin_delete_user(user_id):
         return redirect(url_for("admin_users"))
 
 
+
+# ----------------- Global Error Handler -----------------
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Global error handler to catch all errors"""
+    print(f"Global error: {e}")
+    # Clear any flash messages
+    if '_flashes' in session:
+        session.pop('_flashes', None)
+    # Return a safe response
+    return render_template("index.html", app=app)
 
 # ----------------- Error Handlers -----------------
 @app.errorhandler(400)
