@@ -120,6 +120,10 @@ def login_required(f):
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
         
+        # Ensure database is ready on Vercel
+        if os.environ.get('VERCEL'):
+            ensure_database_ready()
+        
         # Simple check - only clear session if user doesn't exist
         try:
             user = User.query.get(session["user_id"])
@@ -127,7 +131,8 @@ def login_required(f):
                 session.clear()
                 flash("Your session has expired. Please log in again.", "danger")
                 return redirect(url_for("login"))
-        except:
+        except Exception as e:
+            print(f"Database error in login_required: {e}")
             # Database error - don't clear session, just continue
             pass
         
@@ -142,6 +147,10 @@ def admin_required(f):
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
         
+        # Ensure database is ready on Vercel
+        if os.environ.get('VERCEL'):
+            ensure_database_ready()
+        
         # Simple check - only clear session if user doesn't exist
         try:
             user = User.query.get(session["user_id"])
@@ -153,7 +162,8 @@ def admin_required(f):
             if user.role != 'admin':
                 flash("Access denied. Admin privileges required.", "danger")
                 return redirect(url_for("dashboard"))
-        except:
+        except Exception as e:
+            print(f"Database error in admin_required: {e}")
             # Database error - don't clear session, just continue
             pass
         
@@ -168,6 +178,10 @@ def user_only(f):
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
         
+        # Ensure database is ready on Vercel
+        if os.environ.get('VERCEL'):
+            ensure_database_ready()
+        
         # Simple check - only clear session if user doesn't exist
         try:
             user = User.query.get(session["user_id"])
@@ -179,7 +193,8 @@ def user_only(f):
             if user.role == 'admin':
                 flash("Access denied. This page is for regular users only.", "danger")
                 return redirect(url_for("admin_dashboard"))
-        except:
+        except Exception as e:
+            print(f"Database error in user_only: {e}")
             # Database error - don't clear session, just continue
             pass
         
@@ -296,6 +311,7 @@ def ensure_database_ready():
                 
                 # Initialize global data if empty
                 if not VERCEL_DATA["users"]:
+                    print("Initializing Vercel data...")
                     # Add admin user to global data
                     admin_user_data = {
                         "id": 1,
@@ -320,10 +336,17 @@ def ensure_database_ready():
                     
                     # Sync global data to database only if data was initialized
                     sync_vercel_data_to_db()
+                    print(f"Vercel data initialized: {len(VERCEL_DATA['users'])} users")
+                else:
+                    # Always sync existing data to database
+                    sync_vercel_data_to_db()
                 
             except Exception as e:
                 print(f"Database initialization error: {e}")
-                db.session.rollback()
+                try:
+                    db.session.rollback()
+                except:
+                    pass
 
 def sync_vercel_data_to_db():
     """Sync Vercel global data to database"""
@@ -430,8 +453,8 @@ def sync_db_to_vercel_data():
 @app.before_request
 def before_request():
     """Check session validity before each request and ensure database is initialized"""
-    # Only ensure database is ready on Vercel for admin routes that need it
-    if os.environ.get('VERCEL') and request.endpoint in ['admin_dashboard', 'admin_users', 'admin_user_detail']:
+    # Always ensure database is ready on Vercel for all requests
+    if os.environ.get('VERCEL'):
         ensure_database_ready()
     
     # No session validation in before_request - let decorators handle it
@@ -440,6 +463,10 @@ def before_request():
 @app.route("/")
 def home():
     if "user_id" in session:
+        # Ensure database is ready on Vercel
+        if os.environ.get('VERCEL'):
+            ensure_database_ready()
+        
         try:
             user = User.query.get(session["user_id"])
             if user:
@@ -451,7 +478,8 @@ def home():
                 # User not found, clear session
                 session.clear()
                 flash("Your session has expired. Please log in again.", "info")
-        except:
+        except Exception as e:
+            print(f"Database error in home: {e}")
             # Database error - don't clear session
             pass
     return render_template("index.html", app=app)
@@ -558,12 +586,20 @@ def login():
                 flash("Please enter a valid email address.", "danger")
                 return render_template("login.html")
 
+            # Ensure database is ready on Vercel
+            if os.environ.get('VERCEL'):
+                ensure_database_ready()
+            
             user = User.query.filter_by(email=email, is_active=True).first()
             
             if user and check_password_hash(user.password, password):
                 # Update last login
-                user.last_login = datetime.now(timezone.utc)
-                db.session.commit()
+                try:
+                    user.last_login = datetime.now(timezone.utc)
+                    db.session.commit()
+                except Exception as e:
+                    print(f"Error updating last login: {e}")
+                    # Continue even if last login update fails
                 
                 # Set session as permanent
                 session.permanent = True
@@ -2159,6 +2195,39 @@ def test_session():
                 return "User not found in database. Session may be invalid."
         except Exception as e:
             return f"Database error: {str(e)}"
+    except Exception as e:
+        return f"Test error: {str(e)}"
+
+@app.route("/test-admin")
+def test_admin():
+    """Test admin user on Vercel"""
+    try:
+        if os.environ.get('VERCEL'):
+            ensure_database_ready()
+            
+            # Check if admin user exists
+            admin_user = User.query.filter_by(email="admin@expensetracker.com").first()
+            if admin_user:
+                return f"""
+                <h2>Admin User Found!</h2>
+                <p><strong>Username:</strong> {admin_user.username}</p>
+                <p><strong>Email:</strong> {admin_user.email}</p>
+                <p><strong>Role:</strong> {admin_user.role}</p>
+                <p><strong>Active:</strong> {admin_user.is_active}</p>
+                <p><strong>Created:</strong> {admin_user.created_at}</p>
+                
+                <p><a href="/login">Go to Login</a></p>
+                <p><a href="/check-data">Check Database</a></p>
+                """
+            else:
+                return """
+                <h2>Admin User Not Found!</h2>
+                <p>Admin user not found in database.</p>
+                <p><a href="/init-db">Initialize Database</a></p>
+                <p><a href="/check-data">Check Database</a></p>
+                """
+        else:
+            return "This endpoint only works on Vercel"
     except Exception as e:
         return f"Test error: {str(e)}"
 
