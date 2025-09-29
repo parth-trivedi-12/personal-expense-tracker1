@@ -120,22 +120,7 @@ def login_required(f):
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
         
-        # Ensure database is ready on Vercel
-        if os.environ.get('VERCEL'):
-            ensure_database_ready()
-        
-        # Simple check - only clear session if user doesn't exist
-        try:
-            user = User.query.get(session["user_id"])
-            if not user:
-                session.clear()
-                flash("Your session has expired. Please log in again.", "danger")
-                return redirect(url_for("login"))
-        except Exception as e:
-            print(f"Database error in login_required: {e}")
-            # Database error - don't clear session, just continue
-            pass
-        
+        # No database validation - just check if user_id exists in session
         return f(*args, **kwargs)
     return decorated_function
 
@@ -147,25 +132,10 @@ def admin_required(f):
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
         
-        # Ensure database is ready on Vercel
-        if os.environ.get('VERCEL'):
-            ensure_database_ready()
-        
-        # Simple check - only clear session if user doesn't exist
-        try:
-            user = User.query.get(session["user_id"])
-            if not user:
-                session.clear()
-                flash("Your session has expired. Please log in again.", "danger")
-                return redirect(url_for("login"))
-            
-            if user.role != 'admin':
-                flash("Access denied. Admin privileges required.", "danger")
-                return redirect(url_for("dashboard"))
-        except Exception as e:
-            print(f"Database error in admin_required: {e}")
-            # Database error - don't clear session, just continue
-            pass
+        # Only check role from session, no database validation
+        if session.get("role") != 'admin':
+            flash("Access denied. Admin privileges required.", "danger")
+            return redirect(url_for("dashboard"))
         
         return f(*args, **kwargs)
     return decorated_function
@@ -178,25 +148,10 @@ def user_only(f):
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
         
-        # Ensure database is ready on Vercel
-        if os.environ.get('VERCEL'):
-            ensure_database_ready()
-        
-        # Simple check - only clear session if user doesn't exist
-        try:
-            user = User.query.get(session["user_id"])
-            if not user:
-                session.clear()
-                flash("Your session has expired. Please log in again.", "danger")
-                return redirect(url_for("login"))
-            
-            if user.role == 'admin':
-                flash("Access denied. This page is for regular users only.", "danger")
-                return redirect(url_for("admin_dashboard"))
-        except Exception as e:
-            print(f"Database error in user_only: {e}")
-            # Database error - don't clear session, just continue
-            pass
+        # Only check role from session, no database validation
+        if session.get("role") == 'admin':
+            flash("Access denied. This page is for regular users only.", "danger")
+            return redirect(url_for("admin_dashboard"))
         
         return f(*args, **kwargs)
     return decorated_function
@@ -452,36 +407,20 @@ def sync_db_to_vercel_data():
 
 @app.before_request
 def before_request():
-    """Check session validity before each request and ensure database is initialized"""
-    # Always ensure database is ready on Vercel for all requests
+    """Ensure database is ready on Vercel"""
+    # Only ensure database is ready on Vercel, no session validation
     if os.environ.get('VERCEL'):
         ensure_database_ready()
-    
-    # No session validation in before_request - let decorators handle it
 
 # ----------------- Routes -----------------
 @app.route("/")
 def home():
     if "user_id" in session:
-        # Ensure database is ready on Vercel
-        if os.environ.get('VERCEL'):
-            ensure_database_ready()
-        
-        try:
-            user = User.query.get(session["user_id"])
-            if user:
-                if user.role == 'admin':
-                    return redirect(url_for("admin_dashboard"))
-                else:
-                    return redirect(url_for("dashboard"))
-            else:
-                # User not found, clear session
-                session.clear()
-                flash("Your session has expired. Please log in again.", "info")
-        except Exception as e:
-            print(f"Database error in home: {e}")
-            # Database error - don't clear session
-            pass
+        # Simple redirect based on session role, no database validation
+        if session.get("role") == 'admin':
+            return redirect(url_for("admin_dashboard"))
+        else:
+            return redirect(url_for("dashboard"))
     return render_template("index.html", app=app)
 
 @app.route("/register", methods=["GET","POST"])
@@ -2293,6 +2232,30 @@ def test_reports():
             return f"Database error: {str(e)}"
     except Exception as e:
         return f"Test error: {str(e)}"
+
+@app.route("/test-session-simple")
+def test_session_simple():
+    """Simple session test without database validation"""
+    try:
+        session_info = {
+            "user_id": session.get("user_id"),
+            "username": session.get("username"),
+            "role": session.get("role"),
+            "permanent": session.permanent,
+            "is_vercel": bool(os.environ.get('VERCEL')),
+            "session_keys": list(session.keys())
+        }
+        
+        return f"""
+        <h2>Simple Session Test</h2>
+        <pre>{json.dumps(session_info, indent=2)}</pre>
+        
+        <p><a href="/dashboard">Go to Dashboard</a></p>
+        <p><a href="/reports">Go to Reports</a></p>
+        <p><a href="/logout">Logout</a></p>
+        """
+    except Exception as e:
+        return f"Session test error: {str(e)}"
 
 # Initialize database on Vercel
 if os.environ.get('VERCEL'):
