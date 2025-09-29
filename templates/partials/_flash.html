@@ -3,6 +3,7 @@
 {% if messages %}
 <div class="flash-container">
     {% for category, message in messages %}
+    {% if 'session' not in message.lower() and 'log in' not in message.lower() and 'expired' not in message.lower() %}
     <div class="alert alert-{{ category }} alert-dismissible" role="alert">
         <div class="alert-content">
             <span class="alert-icon">
@@ -18,6 +19,7 @@
             </button>
         </div>
     </div>
+    {% endif %}
     {% endfor %}
 </div>
 {% endif %}

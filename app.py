@@ -385,10 +385,17 @@ def before_request():
     # Only ensure database is ready on Vercel, no session validation
     if os.environ.get('VERCEL'):
         ensure_database_ready()
+    
+    # Clear all flash messages to prevent session errors from showing
+    if '_flashes' in session:
+        session.pop('_flashes', None)
 
 # ----------------- Routes -----------------
 @app.route("/")
 def home():
+    # Clear all flash messages
+    if '_flashes' in session:
+        session.pop('_flashes', None)
     # No session validation - just show the home page
     return render_template("index.html", app=app)
 
@@ -542,6 +549,12 @@ def logout():
     session.clear()
     flash("Logged out successfully", "info")
     return redirect(url_for("login"))
+
+@app.route("/clear-session")
+def clear_session():
+    """Clear all session data and flash messages"""
+    session.clear()
+    return redirect(url_for("home"))
 
 # ----------------- Dashboard -----------------
 @app.route("/dashboard")
