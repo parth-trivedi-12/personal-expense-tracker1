@@ -357,6 +357,7 @@ def sync_vercel_data_to_db():
             db.session.add(expense)
         
         db.session.commit()
+        print(f"✅ Synced {len(VERCEL_DATA['users'])} users to database")
         
     except Exception as e:
         print(f"Sync error: {e}")
@@ -1480,6 +1481,10 @@ def delete_account():
 def admin_dashboard():
     """Admin dashboard with system statistics"""
     try:
+        # Ensure database is ready and synced on Vercel
+        if os.environ.get('VERCEL'):
+            ensure_database_ready()
+        
         # Get system statistics
         total_users = User.query.count()
         active_users = User.query.filter_by(is_active=True).count()
@@ -1532,6 +1537,10 @@ def admin_dashboard():
 def admin_users():
     """Manage all users"""
     try:
+        # Ensure database is ready and synced on Vercel
+        if os.environ.get('VERCEL'):
+            ensure_database_ready()
+        
         page = request.args.get('page', 1, type=int)
         search = request.args.get('search', '', type=str)
         role_filter = request.args.get('role', 'all', type=str)
@@ -1971,6 +1980,108 @@ def sync_from_database():
         return "Data synced from database successfully!"
     except Exception as e:
         return f"Sync error: {str(e)}"
+
+@app.route("/export-vercel-users")
+def export_vercel_users():
+    """Export users from Vercel to local database"""
+    try:
+        if os.environ.get('VERCEL'):
+            # On Vercel, show the persistent data
+            users_data = VERCEL_DATA["users"]
+            return f"""
+            <h2>Vercel Users Data</h2>
+            <p><strong>Total Users:</strong> {len(users_data)}</p>
+            <pre>{json.dumps(users_data, indent=2, default=str)}</pre>
+            
+            <h3>Instructions to sync to local database:</h3>
+            <ol>
+                <li>Copy the JSON data above</li>
+                <li>Run this Python script on your local machine:</li>
+            </ol>
+            
+            <pre>
+import sqlite3
+from werkzeug.security import generate_password_hash
+from datetime import datetime, timezone
+
+# Connect to local database
+conn = sqlite3.connect('expense.db')
+cursor = conn.cursor()
+
+# Clear existing users (except admin)
+cursor.execute("DELETE FROM user WHERE role != 'admin'")
+
+# Add users from Vercel data
+for user_data in users_data:
+    if user_data['role'] != 'admin':  # Skip admin as it already exists
+        cursor.execute("""
+            INSERT INTO user (username, email, password, role, is_active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            user_data['username'],
+            user_data['email'],
+            user_data['password'],
+            user_data['role'],
+            user_data['is_active'],
+            user_data['created_at']
+        ))
+
+conn.commit()
+conn.close()
+print("Users synced to local database!")
+            </pre>
+            """
+        else:
+            # On local, show current users
+            with app.app_context():
+                users = User.query.all()
+                users_data = []
+                for user in users:
+                    users_data.append({
+                        "id": user.id,
+                        "username": user.username,
+                        "email": user.email,
+                        "role": user.role,
+                        "is_active": user.is_active,
+                        "created_at": user.created_at.isoformat() if user.created_at else None
+                    })
+                
+                return f"""
+                <h2>Local Database Users</h2>
+                <p><strong>Total Users:</strong> {len(users_data)}</p>
+                <pre>{json.dumps(users_data, indent=2)}</pre>
+                """
+    except Exception as e:
+        return f"Export error: {str(e)}"
+
+@app.route("/force-sync")
+def force_sync():
+    """Force sync all data on Vercel"""
+    try:
+        if os.environ.get('VERCEL'):
+            # Force sync from persistent data to database
+            sync_vercel_data_to_db()
+            
+            # Get current counts
+            with app.app_context():
+                user_count = User.query.count()
+                expense_count = Expense.query.count()
+                category_count = Category.query.count()
+            
+            return f"""
+            <h2>Force Sync Completed</h2>
+            <p><strong>Users in database:</strong> {user_count}</p>
+            <p><strong>Expenses in database:</strong> {expense_count}</p>
+            <p><strong>Categories in database:</strong> {category_count}</p>
+            <p><strong>Users in persistent storage:</strong> {len(VERCEL_DATA['users'])}</p>
+            
+            <p><a href="/admin">Go to Admin Panel</a></p>
+            <p><a href="/check-data">Check Database</a></p>
+            """
+        else:
+            return "This endpoint only works on Vercel"
+    except Exception as e:
+        return f"Force sync error: {str(e)}"
 
 # Initialize database on Vercel
 if os.environ.get('VERCEL'):
