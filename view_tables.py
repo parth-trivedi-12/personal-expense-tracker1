@@ -1,81 +1,61 @@
-# Database Table Viewer for Personal Expense Tracker
-from app import app, db
-from sqlalchemy import inspect, text
+#!/usr/bin/env python3
+"""
+Database table viewer utility
+"""
 
-def view_all_tables():
-    with app.app_context():
-        inspector = inspect(db.engine)
+import sqlite3
+import os
+
+def view_database_tables():
+    """View all tables and their data"""
+    db_path = 'expense.db'
+    
+    if not os.path.exists(db_path):
+        print(f"❌ Database file not found: {db_path}")
+        return
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
         
-        print("=" * 60)
-        print("DATABASE TABLES IN YOUR EXPENSE TRACKER")
-        print("=" * 60)
+        print("📊 Database Tables Overview")
+        print("=" * 50)
         
-        # Get all table names
-        tables = inspector.get_table_names()
+        # Get all tables
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = cursor.fetchall()
         
-        if not tables:
-            print("No tables found in the database.")
-            return
-        
-        print(f"\nFound {len(tables)} tables:")
-        print("-" * 40)
-        
-        for i, table in enumerate(tables, 1):
-            print(f"{i}. {table}")
-        
-        print("\n" + "=" * 60)
-        print("DETAILED TABLE INFORMATION")
-        print("=" * 60)
-        
-        # Get detailed information about each table
         for table_name in tables:
-            print(f"\n--- TABLE: {table_name.upper()} ---")
+            table = table_name[0]
+            print(f"\n📋 Table: {table}")
+            print("-" * 30)
             
-            # Get column information
-            columns = inspector.get_columns(table_name)
+            # Get table schema
+            cursor.execute(f"PRAGMA table_info({table})")
+            columns = cursor.fetchall()
+            
             print("Columns:")
             for col in columns:
-                nullable = "NULL" if col['nullable'] else "NOT NULL"
-                default = f" (default: {col['default']})" if col['default'] is not None else ""
-                print(f"  • {col['name']}: {col['type']} {nullable}{default}")
+                print(f"  - {col[1]} ({col[2]})")
             
             # Get row count
-            try:
-                result = db.session.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
-                count = result.scalar()
-                print(f"Rows: {count}")
-            except Exception as e:
-                print(f"Could not get row count: {e}")
+            cursor.execute(f"SELECT COUNT(*) FROM {table}")
+            count = cursor.fetchone()[0]
+            print(f"Rows: {count}")
             
-            print("-" * 50)
+            # Show sample data (first 5 rows)
+            if count > 0:
+                cursor.execute(f"SELECT * FROM {table} LIMIT 5")
+                rows = cursor.fetchall()
+                print("Sample data:")
+                for row in rows:
+                    print(f"  {row}")
         
-        print("\n" + "=" * 60)
-        print("SAMPLE DATA FROM EACH TABLE")
-        print("=" * 60)
+        conn.close()
+        print("\n✅ Database inspection completed!")
         
-        # Show sample data from each table
-        for table_name in tables:
-            try:
-                result = db.session.execute(text(f"SELECT * FROM {table_name} LIMIT 3"))
-                rows = result.fetchall()
-                
-                if rows:
-                    print(f"\n--- SAMPLE DATA FROM {table_name.upper()} ---")
-                    for i, row in enumerate(rows, 1):
-                        print(f"Row {i}: {dict(row._mapping)}")
-                else:
-                    print(f"\n--- {table_name.upper()} is empty ---")
-                    
-            except Exception as e:
-                print(f"\n--- Could not read from {table_name}: {e} ---")
-            
-            print("-" * 50)
+    except Exception as e:
+        print(f"❌ Error viewing database: {e}")
 
 if __name__ == "__main__":
-    print("Starting database inspection...")
-    try:
-        view_all_tables()
-        print("\nDatabase inspection completed successfully!")
-    except Exception as e:
-        print(f"Error during database inspection: {e}")
-        print("Make sure your Flask app is properly configured and the database exists.")
+    view_database_tables()

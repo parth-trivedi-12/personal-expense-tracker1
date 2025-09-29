@@ -22,6 +22,12 @@ app = Flask(__name__)
 # Generate secure secret key
 app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
 
+# Session configuration
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # 24 hours session timeout
+app.config['SESSION_COOKIE_SECURE'] = False  # Set to True in production with HTTPS
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
 # Initialize CSRF protection
 csrf = CSRFProtect(app)
 
@@ -88,14 +94,10 @@ def validate_email(email):
 
 def validate_password(password):
     """Validate password strength"""
-    if len(password) < 8:
-        return False, "Password must be at least 8 characters long"
-    if not re.search(r'[A-Z]', password):
-        return False, "Password must contain at least one uppercase letter"
-    if not re.search(r'[a-z]', password):
-        return False, "Password must contain at least one lowercase letter"
-    if not re.search(r'\d', password):
-        return False, "Password must contain at least one digit"
+    if len(password) < 6:
+        return False, "Password must be at least 6 characters long"
+    if len(password) > 128:
+        return False, "Password must be less than 128 characters"
     return True, "Password is valid"
 
 def validate_amount(amount_str):
@@ -127,6 +129,14 @@ def login_required(f):
         if "user_id" not in session:
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
+        
+        # Verify user still exists and is active
+        user = User.query.get(session["user_id"])
+        if not user or not user.is_active:
+            session.clear()
+            flash("Your session has expired. Please log in again.", "danger")
+            return redirect(url_for("login"))
+        
         return f(*args, **kwargs)
     return decorated_function
 
@@ -139,7 +149,12 @@ def admin_required(f):
             return redirect(url_for("login"))
         
         user = User.query.get(session["user_id"])
-        if not user or user.role != 'admin':
+        if not user or not user.is_active:
+            session.clear()
+            flash("Your session has expired. Please log in again.", "danger")
+            return redirect(url_for("login"))
+        
+        if user.role != 'admin':
             flash("Access denied. Admin privileges required.", "danger")
             return redirect(url_for("dashboard"))
         
@@ -155,8 +170,9 @@ def user_only(f):
             return redirect(url_for("login"))
         
         user = User.query.get(session["user_id"])
-        if not user:
-            flash("User not found.", "danger")
+        if not user or not user.is_active:
+            session.clear()
+            flash("Your session has expired. Please log in again.", "danger")
             return redirect(url_for("login"))
         
         if user.role == 'admin':
@@ -257,15 +273,30 @@ class AdminLog(db.Model):
     target_user = db.relationship('User', foreign_keys=[target_user_id], backref='admin_targeted_actions')
 
 
+# ----------------- Before Request Handler -----------------
+@app.before_request
+def before_request():
+    """Check session validity before each request"""
+    if "user_id" in session:
+        user = User.query.get(session["user_id"])
+        if not user or not user.is_active:
+            session.clear()
+            flash("Your session has expired. Please log in again.", "info")
+
 # ----------------- Routes -----------------
 @app.route("/")
 def home():
     if "user_id" in session:
         user = User.query.get(session["user_id"])
-        if user and user.role == 'admin':
-            return redirect(url_for("admin_dashboard"))
+        if user and user.is_active:
+            if user.role == 'admin':
+                return redirect(url_for("admin_dashboard"))
+            else:
+                return redirect(url_for("dashboard"))
         else:
-            return redirect(url_for("dashboard"))
+            # User not found or inactive, clear session
+            session.clear()
+            flash("Your session has expired. Please log in again.", "info")
     return render_template("index.html", app=app)
 
 @app.route("/register", methods=["GET","POST"])
@@ -362,7 +393,8 @@ def login():
                 user.last_login = datetime.now(timezone.utc)
                 db.session.commit()
                 
-                # Set session
+                # Set session as permanent
+                session.permanent = True
                 session["user_id"] = user.id
                 session["username"] = user.username
                 session["role"] = user.role
@@ -408,9 +440,32 @@ def dashboard():
     remaining = budget_amount - total_expenses
     overspending_alert = "No Alerts 🎉" if remaining>=0 else "Overspending! ⚠️"
 
+    # Get user's categories for expenses by category
+    user_categories = Category.query.filter_by(user_id=user_id).all()
+    if not user_categories:
+        # Create default categories if none exist
+        default_categories = [
+            {"name": "Food", "color": "#ef4444", "icon": "🍕"},
+            {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
+            {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
+            {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
+            {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
+        ]
+        
+        for cat_data in default_categories:
+            category = Category(
+                user_id=user_id,
+                name=cat_data["name"],
+                color=cat_data["color"],
+                icon=cat_data["icon"]
+            )
+            db.session.add(category)
+        
+        db.session.commit()
+        user_categories = Category.query.filter_by(user_id=user_id).all()
+    
     # Expenses by category
-    categories = ["Food", "Travel", "Shopping", "Utilities", "Other"]
-    expenses_by_category = {cat: 0 for cat in categories}
+    expenses_by_category = {cat.name: 0 for cat in user_categories}
     for e in expenses:
         if e.category in expenses_by_category:
             expenses_by_category[e.category] += e.amount
@@ -461,6 +516,28 @@ def expenses():
 
             # Validate category - check if it exists in user's categories
             user_categories = [cat.name for cat in Category.query.filter_by(user_id=user_id).all()]
+            if not user_categories:
+                # If no categories exist, create default ones
+                default_categories = [
+                    {"name": "Food", "color": "#ef4444", "icon": "🍕"},
+                    {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
+                    {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
+                    {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
+                    {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
+                ]
+                
+                for cat_data in default_categories:
+                    category_obj = Category(
+                        user_id=user_id,
+                        name=cat_data["name"],
+                        color=cat_data["color"],
+                        icon=cat_data["icon"]
+                    )
+                    db.session.add(category_obj)
+                
+                db.session.commit()
+                user_categories = [cat_data["name"] for cat_data in default_categories]
+            
             if category not in user_categories:
                 flash("Invalid category selected.", "danger")
                 return redirect(url_for("expenses"))
@@ -605,9 +682,9 @@ def edit_expense(id):
                 flash(error_msg, "danger")
                 return render_template("edit_expense.html", expense=expense, user_categories=user_categories)
 
-            # Validate category
-            valid_categories = ["Food", "Travel", "Shopping", "Utilities", "Other"]
-            if category not in valid_categories:
+            # Validate category - check if it exists in user's categories
+            user_categories_names = [cat.name for cat in user_categories]
+            if category not in user_categories_names:
                 flash("Invalid category selected.", "danger")
                 return render_template("edit_expense.html", expense=expense, user_categories=user_categories)
 
@@ -818,9 +895,32 @@ def reports():
         budget_amount = budget.amount if budget else 0
         remaining = budget_amount - total_expenses
         
+        # Get user's categories for expenses by category
+        user_categories = Category.query.filter_by(user_id=user_id).all()
+        if not user_categories:
+            # Create default categories if none exist
+            default_categories = [
+                {"name": "Food", "color": "#ef4444", "icon": "🍕"},
+                {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
+                {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
+                {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
+                {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
+            ]
+            
+            for cat_data in default_categories:
+                category = Category(
+                    user_id=user_id,
+                    name=cat_data["name"],
+                    color=cat_data["color"],
+                    icon=cat_data["icon"]
+                )
+                db.session.add(category)
+            
+            db.session.commit()
+            user_categories = Category.query.filter_by(user_id=user_id).all()
+        
         # Calculate expenses by category
-        categories = ["Food", "Travel", "Shopping", "Utilities", "Other"]
-        expenses_by_category = {cat: 0 for cat in categories}
+        expenses_by_category = {cat.name: 0 for cat in user_categories}
         for e in expenses:
             if e.category in expenses_by_category:
                 expenses_by_category[e.category] += e.amount
@@ -872,9 +972,32 @@ def export_pdf():
         budget_amount = budget.amount if budget else 0
         remaining = budget_amount - total_expenses
         
+        # Get user's categories for expenses by category
+        user_categories = Category.query.filter_by(user_id=user_id).all()
+        if not user_categories:
+            # Create default categories if none exist
+            default_categories = [
+                {"name": "Food", "color": "#ef4444", "icon": "🍕"},
+                {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
+                {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
+                {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
+                {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
+            ]
+            
+            for cat_data in default_categories:
+                category = Category(
+                    user_id=user_id,
+                    name=cat_data["name"],
+                    color=cat_data["color"],
+                    icon=cat_data["icon"]
+                )
+                db.session.add(category)
+            
+            db.session.commit()
+            user_categories = Category.query.filter_by(user_id=user_id).all()
+        
         # Calculate expenses by category
-        categories = ["Food", "Travel", "Shopping", "Utilities", "Other"]
-        expenses_by_category = {cat: 0 for cat in categories}
+        expenses_by_category = {cat.name: 0 for cat in user_categories}
         for e in expenses:
             if e.category in expenses_by_category:
                 expenses_by_category[e.category] += e.amount
