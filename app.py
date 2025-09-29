@@ -120,14 +120,25 @@ def login_required(f):
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
         
-        # Verify user still exists and is active
-        user = User.query.get(session["user_id"])
-        if not user or not user.is_active:
-            session.clear()
-            flash("Your session has expired. Please log in again.", "danger")
+        try:
+            # Verify user still exists and is active
+            user = User.query.get(session["user_id"])
+            if not user:
+                session.clear()
+                flash("Your session has expired. Please log in again.", "danger")
+                return redirect(url_for("login"))
+            
+            if not user.is_active:
+                session.clear()
+                flash("Your account has been deactivated. Please contact support.", "danger")
+                return redirect(url_for("login"))
+            
+            return f(*args, **kwargs)
+        except Exception as e:
+            print(f"Error in login_required decorator: {e}")
+            # Don't clear session on database errors, just redirect to login
+            flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
-        
-        return f(*args, **kwargs)
     return decorated_function
 
 def admin_required(f):
@@ -138,17 +149,28 @@ def admin_required(f):
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
         
-        user = User.query.get(session["user_id"])
-        if not user or not user.is_active:
-            session.clear()
-            flash("Your session has expired. Please log in again.", "danger")
+        try:
+            user = User.query.get(session["user_id"])
+            if not user:
+                session.clear()
+                flash("Your session has expired. Please log in again.", "danger")
+                return redirect(url_for("login"))
+            
+            if not user.is_active:
+                session.clear()
+                flash("Your account has been deactivated. Please contact support.", "danger")
+                return redirect(url_for("login"))
+            
+            if user.role != 'admin':
+                flash("Access denied. Admin privileges required.", "danger")
+                return redirect(url_for("dashboard"))
+            
+            return f(*args, **kwargs)
+        except Exception as e:
+            print(f"Error in admin_required decorator: {e}")
+            # Don't clear session on database errors, just redirect to login
+            flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
-        
-        if user.role != 'admin':
-            flash("Access denied. Admin privileges required.", "danger")
-            return redirect(url_for("dashboard"))
-        
-        return f(*args, **kwargs)
     return decorated_function
 
 def user_only(f):
@@ -159,17 +181,28 @@ def user_only(f):
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
         
-        user = User.query.get(session["user_id"])
-        if not user or not user.is_active:
-            session.clear()
-            flash("Your session has expired. Please log in again.", "danger")
+        try:
+            user = User.query.get(session["user_id"])
+            if not user:
+                session.clear()
+                flash("Your session has expired. Please log in again.", "danger")
+                return redirect(url_for("login"))
+            
+            if not user.is_active:
+                session.clear()
+                flash("Your account has been deactivated. Please contact support.", "danger")
+                return redirect(url_for("login"))
+            
+            if user.role == 'admin':
+                flash("Access denied. This page is for regular users only.", "danger")
+                return redirect(url_for("admin_dashboard"))
+            
+            return f(*args, **kwargs)
+        except Exception as e:
+            print(f"Error in user_only decorator: {e}")
+            # Don't clear session on database errors, just redirect to login
+            flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
-        
-        if user.role == 'admin':
-            flash("Access denied. This page is for regular users only.", "danger")
-            return redirect(url_for("admin_dashboard"))
-        
-        return f(*args, **kwargs)
     return decorated_function
 
 def log_admin_action(action, target_user_id=None, details=None):
@@ -416,28 +449,12 @@ def sync_db_to_vercel_data():
 @app.before_request
 def before_request():
     """Check session validity before each request and ensure database is initialized"""
-    # Only ensure database is ready on Vercel for specific routes that need it
+    # Only ensure database is ready on Vercel for admin routes that need it
     if os.environ.get('VERCEL') and request.endpoint in ['admin_dashboard', 'admin_users', 'admin_user_detail']:
         ensure_database_ready()
     
-    if "user_id" in session:
-        try:
-            user = User.query.get(session["user_id"])
-            if not user:
-                # User doesn't exist in database, clear session
-                session.clear()
-                flash("Your session has expired. Please log in again.", "info")
-            elif not user.is_active:
-                # User exists but is inactive, clear session
-                session.clear()
-                flash("Your account has been deactivated. Please contact support.", "danger")
-        except Exception as e:
-            # If there's a database error, don't clear the session immediately
-            print(f"Database error in before_request: {e}")
-            # Only clear session if it's a critical database error
-            if "no such table" in str(e).lower():
-                session.clear()
-                flash("Database error. Please log in again.", "danger")
+    # Don't do session validation in before_request - let the decorators handle it
+    # This prevents conflicts and multiple session checks
 
 # ----------------- Routes -----------------
 @app.route("/")
@@ -2103,7 +2120,8 @@ def session_status():
             "username": session.get("username"),
             "role": session.get("role"),
             "permanent": session.permanent,
-            "is_vercel": bool(os.environ.get('VERCEL'))
+            "is_vercel": bool(os.environ.get('VERCEL')),
+            "current_endpoint": request.endpoint
         }
         
         if session.get("user_id"):
@@ -2123,6 +2141,7 @@ def session_status():
         <pre>{json.dumps(session_info, indent=2)}</pre>
         
         <p><a href="/dashboard">Go to Dashboard</a></p>
+        <p><a href="/reports">Go to Reports</a></p>
         <p><a href="/logout">Logout</a></p>
         """
     except Exception as e:
