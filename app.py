@@ -1612,6 +1612,37 @@ def setup_admin():
     except Exception as e:
         return f"Error: {str(e)}"
 
+@app.route("/init-db")
+def init_database_endpoint():
+    """Initialize database for Vercel deployment"""
+    try:
+        # Create all tables
+        db.create_all()
+        
+        # Create admin user
+        admin_email = "admin@expensetracker.com"
+        admin_user = User.query.filter_by(email=admin_email).first()
+        
+        if admin_user:
+            admin_user.password = generate_password_hash("admin123")
+            admin_user.is_active = True
+            admin_user.role = "admin"
+            db.session.commit()
+            return f"Database initialized! Admin user updated: {admin_email} / admin123"
+        else:
+            admin_user = User(
+                username="admin",
+                email=admin_email,
+                password=generate_password_hash("admin123"),
+                role="admin",
+                is_active=True
+            )
+            db.session.add(admin_user)
+            db.session.commit()
+            return f"Database initialized! Admin user created: {admin_email} / admin123"
+    except Exception as e:
+        return f"Database initialization error: {str(e)}"
+
 if __name__=="__main__":
     init_database()
     app.run(debug=True, port=5001)
