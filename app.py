@@ -579,46 +579,82 @@ def logout():
 @user_only
 def dashboard():
     user_id = session["user_id"]
-
-    expenses = Expense.query.filter_by(user_id=user_id).all()
-    total_expenses = sum([e.amount for e in expenses])
-    budget = Budget.query.filter_by(user_id=user_id).first()
-    budget_amount = budget.amount if budget else 0
-    remaining = budget_amount - total_expenses
-    overspending_alert = "No Alerts 🎉" if remaining>=0 else "Overspending! ⚠️"
-
-    # Get user's categories for expenses by category
-    user_categories = Category.query.filter_by(user_id=user_id).all()
-    if not user_categories:
-        # Create default categories if none exist
-        default_categories = [
-            {"name": "Food", "color": "#ef4444", "icon": "🍕"},
-            {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
-            {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
-            {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
-            {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
-        ]
-        
-        for cat_data in default_categories:
-            category = Category(
-                user_id=user_id,
-                name=cat_data["name"],
-                color=cat_data["color"],
-                icon=cat_data["icon"]
-            )
-            db.session.add(category)
-        
-        db.session.commit()
-        user_categories = Category.query.filter_by(user_id=user_id).all()
     
-    # Expenses by category
-    expenses_by_category = {cat.name: 0 for cat in user_categories}
-    for e in expenses:
-        if e.category in expenses_by_category:
-            expenses_by_category[e.category] += e.amount
+    # Ensure database is ready on Vercel
+    if os.environ.get('VERCEL'):
+        ensure_database_ready()
+
+    # Initialize default values
+    total_expenses = 0
+    budget_amount = 0
+    remaining = 0
+    overspending_alert = "No Alerts 🎉"
+    expenses_by_category = {}
+
+    try:
+        # Get expenses with error handling
+        try:
+            expenses = Expense.query.filter_by(user_id=user_id).all()
+            total_expenses = sum([e.amount for e in expenses]) if expenses else 0
+        except:
+            expenses = []
+            total_expenses = 0
+
+        # Get budget with error handling
+        try:
+            budget = Budget.query.filter_by(user_id=user_id).first()
+            budget_amount = budget.amount if budget else 0
+        except:
+            budget_amount = 0
+
+        remaining = budget_amount - total_expenses
+        overspending_alert = "No Alerts 🎉" if remaining >= 0 else "Overspending! ⚠️"
+
+        # Get user's categories with error handling
+        try:
+            user_categories = Category.query.filter_by(user_id=user_id).all()
+            if not user_categories:
+                # Create default categories if none exist
+                default_categories = [
+                    {"name": "Food", "color": "#ef4444", "icon": "🍕"},
+                    {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
+                    {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
+                    {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
+                    {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
+                ]
+                
+                for cat_data in default_categories:
+                    try:
+                        category = Category(
+                            user_id=user_id,
+                            name=cat_data["name"],
+                            color=cat_data["color"],
+                            icon=cat_data["icon"]
+                        )
+                        db.session.add(category)
+                    except:
+                        pass
+                
+                try:
+                    db.session.commit()
+                    user_categories = Category.query.filter_by(user_id=user_id).all()
+                except:
+                    user_categories = []
+        except:
+            user_categories = []
+
+        # Calculate expenses by category
+        expenses_by_category = {cat.name: 0 for cat in user_categories}
+        for e in expenses:
+            if e.category in expenses_by_category:
+                expenses_by_category[e.category] += e.amount
+
+    except Exception as e:
+        print(f"Dashboard error: {e}")
+        # Use default values if any error occurs
 
     return render_template("dashboard.html",
-                           name=session["username"],
+                           name=session.get("username", "User"),
                            total_expenses=total_expenses,
                            budget_amount=budget_amount,
                            remaining=remaining,
@@ -630,6 +666,10 @@ def dashboard():
 @user_only
 def expenses():
     user_id = session["user_id"]
+    
+    # Ensure database is ready on Vercel
+    if os.environ.get('VERCEL'):
+        ensure_database_ready()
 
     if request.method == "POST":
         try:
@@ -719,52 +759,64 @@ def expenses():
             flash("An error occurred while adding the expense. Please try again.", "danger")
             return redirect(url_for("expenses"))
 
-    # Get user's categories
-    user_categories = Category.query.filter_by(user_id=user_id).order_by(Category.name).all()
-    
-    # If user has no categories, create default ones
-    if not user_categories:
-        default_categories = [
-            {"name": "Food", "color": "#ef4444", "icon": "🍕"},
-            {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
-            {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
-            {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
-            {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
-        ]
-        
-        for cat_data in default_categories:
-            category = Category(
-                user_id=user_id,
-                name=cat_data["name"],
-                color=cat_data["color"],
-                icon=cat_data["icon"]
-            )
-            db.session.add(category)
-        
-        db.session.commit()
+    # Get user's categories with error handling
+    try:
         user_categories = Category.query.filter_by(user_id=user_id).order_by(Category.name).all()
+        
+        # If user has no categories, create default ones
+        if not user_categories:
+            default_categories = [
+                {"name": "Food", "color": "#ef4444", "icon": "🍕"},
+                {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
+                {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
+                {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
+                {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
+            ]
+            
+            for cat_data in default_categories:
+                try:
+                    category = Category(
+                        user_id=user_id,
+                        name=cat_data["name"],
+                        color=cat_data["color"],
+                        icon=cat_data["icon"]
+                    )
+                    db.session.add(category)
+                except:
+                    pass
+            
+            try:
+                db.session.commit()
+                user_categories = Category.query.filter_by(user_id=user_id).order_by(Category.name).all()
+            except:
+                user_categories = []
+    except:
+        user_categories = []
 
     filter_category = request.args.get("category", "All")
     search_term = request.args.get("search", "").strip()
     
-    # Build query
-    query = Expense.query.filter_by(user_id=user_id)
-    
-    # Apply category filter
-    if filter_category != "All":
-        query = query.filter(Expense.category == filter_category)
-    
-    # Apply search filter
-    if search_term:
-        query = query.filter(
-            db.or_(
-                Expense.title.ilike(f"%{search_term}%"),
-                Expense.description.ilike(f"%{search_term}%"),
-                Expense.category.ilike(f"%{search_term}%")
+    # Build query with error handling
+    try:
+        query = Expense.query.filter_by(user_id=user_id)
+        
+        # Apply category filter
+        if filter_category != "All":
+            query = query.filter(Expense.category == filter_category)
+        
+        # Apply search filter
+        if search_term:
+            query = query.filter(
+                db.or_(
+                    Expense.title.ilike(f"%{search_term}%"),
+                    Expense.description.ilike(f"%{search_term}%"),
+                    Expense.category.ilike(f"%{search_term}%")
+                )
             )
-        )
-    
-    user_expenses = query.order_by(Expense.date.desc()).all()
+        
+        user_expenses = query.order_by(Expense.date.desc()).all()
+    except:
+        user_expenses = []
 
     # Calculate expenses by category
     expenses_by_category = {}
