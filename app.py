@@ -120,8 +120,8 @@ def login_required(f):
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
         
+        # Only check user existence, don't clear session on errors
         try:
-            # Verify user still exists and is active
             user = User.query.get(session["user_id"])
             if not user:
                 session.clear()
@@ -132,13 +132,12 @@ def login_required(f):
                 session.clear()
                 flash("Your account has been deactivated. Please contact support.", "danger")
                 return redirect(url_for("login"))
-            
-            return f(*args, **kwargs)
         except Exception as e:
-            print(f"Error in login_required decorator: {e}")
-            # Don't clear session on database errors, just redirect to login
-            flash("Please log in to access this page.", "danger")
-            return redirect(url_for("login"))
+            print(f"Database error in login_required: {e}")
+            # Don't clear session on database errors - just continue
+            pass
+        
+        return f(*args, **kwargs)
     return decorated_function
 
 def admin_required(f):
@@ -149,6 +148,7 @@ def admin_required(f):
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
         
+        # Only check user existence and role, don't clear session on errors
         try:
             user = User.query.get(session["user_id"])
             if not user:
@@ -164,13 +164,12 @@ def admin_required(f):
             if user.role != 'admin':
                 flash("Access denied. Admin privileges required.", "danger")
                 return redirect(url_for("dashboard"))
-            
-            return f(*args, **kwargs)
         except Exception as e:
-            print(f"Error in admin_required decorator: {e}")
-            # Don't clear session on database errors, just redirect to login
-            flash("Please log in to access this page.", "danger")
-            return redirect(url_for("login"))
+            print(f"Database error in admin_required: {e}")
+            # Don't clear session on database errors - just continue
+            pass
+        
+        return f(*args, **kwargs)
     return decorated_function
 
 def user_only(f):
@@ -181,6 +180,7 @@ def user_only(f):
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
         
+        # Only check user existence and role, don't clear session on errors
         try:
             user = User.query.get(session["user_id"])
             if not user:
@@ -196,13 +196,12 @@ def user_only(f):
             if user.role == 'admin':
                 flash("Access denied. This page is for regular users only.", "danger")
                 return redirect(url_for("admin_dashboard"))
-            
-            return f(*args, **kwargs)
         except Exception as e:
-            print(f"Error in user_only decorator: {e}")
-            # Don't clear session on database errors, just redirect to login
-            flash("Please log in to access this page.", "danger")
-            return redirect(url_for("login"))
+            print(f"Database error in user_only: {e}")
+            # Don't clear session on database errors - just continue
+            pass
+        
+        return f(*args, **kwargs)
     return decorated_function
 
 def log_admin_action(action, target_user_id=None, details=None):
@@ -453,8 +452,18 @@ def before_request():
     if os.environ.get('VERCEL') and request.endpoint in ['admin_dashboard', 'admin_users', 'admin_user_detail']:
         ensure_database_ready()
     
-    # Don't do session validation in before_request - let the decorators handle it
-    # This prevents conflicts and multiple session checks
+    # Simple session check - only clear session if user_id exists but user doesn't exist
+    if "user_id" in session:
+        try:
+            user = User.query.get(session["user_id"])
+            if not user:
+                # User doesn't exist, clear session
+                session.clear()
+                flash("Your session has expired. Please log in again.", "info")
+        except Exception as e:
+            # Database error - don't clear session, just log it
+            print(f"Database error in before_request: {e}")
+            pass
 
 # ----------------- Routes -----------------
 @app.route("/")
@@ -2121,7 +2130,8 @@ def session_status():
             "role": session.get("role"),
             "permanent": session.permanent,
             "is_vercel": bool(os.environ.get('VERCEL')),
-            "current_endpoint": request.endpoint
+            "current_endpoint": request.endpoint,
+            "session_keys": list(session.keys())
         }
         
         if session.get("user_id"):
@@ -2143,9 +2153,39 @@ def session_status():
         <p><a href="/dashboard">Go to Dashboard</a></p>
         <p><a href="/reports">Go to Reports</a></p>
         <p><a href="/logout">Logout</a></p>
+        <p><a href="/test-session">Test Session</a></p>
         """
     except Exception as e:
         return f"Session status error: {str(e)}"
+
+@app.route("/test-session")
+def test_session():
+    """Test session functionality"""
+    try:
+        if "user_id" not in session:
+            return "No session found. Please <a href='/login'>login</a> first."
+        
+        # Test database access
+        try:
+            user = User.query.get(session["user_id"])
+            if user:
+                return f"""
+                <h2>Session Test Successful!</h2>
+                <p><strong>User:</strong> {user.username}</p>
+                <p><strong>Email:</strong> {user.email}</p>
+                <p><strong>Role:</strong> {user.role}</p>
+                <p><strong>Active:</strong> {user.is_active}</p>
+                
+                <p><a href="/dashboard">Go to Dashboard</a></p>
+                <p><a href="/reports">Go to Reports</a></p>
+                <p><a href="/session-status">Check Session Status</a></p>
+                """
+            else:
+                return "User not found in database. Session may be invalid."
+        except Exception as e:
+            return f"Database error: {str(e)}"
+    except Exception as e:
+        return f"Test error: {str(e)}"
 
 # Initialize database on Vercel
 if os.environ.get('VERCEL'):
