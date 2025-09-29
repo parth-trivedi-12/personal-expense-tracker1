@@ -1583,6 +1583,35 @@ def init_database():
                 app.logger.error(f"Database recreation failed: {str(e2)}")
                 print(f"Database recreation failed: {str(e2)}")
 
+@app.route("/setup-admin")
+def setup_admin():
+    """Setup admin user for Vercel deployment"""
+    try:
+        admin_email = "admin@expensetracker.com"
+        admin_user = User.query.filter_by(email=admin_email).first()
+        
+        if admin_user:
+            # Update existing admin
+            admin_user.password = generate_password_hash("admin123")
+            admin_user.is_active = True
+            admin_user.role = "admin"
+            db.session.commit()
+            return f"Admin user updated: {admin_email} / admin123"
+        else:
+            # Create new admin
+            admin_user = User(
+                username="admin",
+                email=admin_email,
+                password=generate_password_hash("admin123"),
+                role="admin",
+                is_active=True
+            )
+            db.session.add(admin_user)
+            db.session.commit()
+            return f"Admin user created: {admin_email} / admin123"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
 if __name__=="__main__":
     init_database()
     app.run(debug=True, port=5001)
