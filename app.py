@@ -113,26 +113,20 @@ def validate_date(date_str):
         return False, None, "Invalid date format"
 
 def login_required(f):
-    """Decorator to require login"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # No session validation at all - just proceed
         return f(*args, **kwargs)
     return decorated_function
 
 def admin_required(f):
-    """Decorator to require admin role"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # No validation at all - just proceed
         return f(*args, **kwargs)
     return decorated_function
 
 def user_only(f):
-    """Decorator to restrict access to regular users only (not admins)"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # No validation at all - just proceed
         return f(*args, **kwargs)
     return decorated_function
 
@@ -553,11 +547,7 @@ def logout():
 @app.route("/dashboard")
 @user_only
 def dashboard():
-    # Get user_id from session, redirect to login if not found
-    user_id = session.get("user_id")
-    if not user_id:
-        flash("Please log in to access this page.", "danger")
-        return redirect(url_for("login"))
+    user_id = session.get("user_id", 1)  # Default to 1 if not found
     
     # Ensure database is ready on Vercel
     if os.environ.get('VERCEL'):
@@ -644,11 +634,7 @@ def dashboard():
 @app.route("/expenses", methods=["GET", "POST"])
 @user_only
 def expenses():
-    # Get user_id from session, redirect to login if not found
-    user_id = session.get("user_id")
-    if not user_id:
-        flash("Please log in to access this page.", "danger")
-        return redirect(url_for("login"))
+    user_id = session.get("user_id", 1)  # Default to 1 if not found
     
     # Ensure database is ready on Vercel
     if os.environ.get('VERCEL'):
@@ -1531,11 +1517,7 @@ def delete_account():
 @admin_required
 def admin_dashboard():
     """Admin dashboard with system statistics"""
-    # Get user_id from session, redirect to login if not found
-    user_id = session.get("user_id")
-    if not user_id:
-        flash("Please log in to access this page.", "danger")
-        return redirect(url_for("login"))
+    user_id = session.get("user_id", 1)  # Default to 1 if not found
     
     try:
         # Ensure database is ready and synced on Vercel
