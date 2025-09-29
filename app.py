@@ -264,6 +264,14 @@ class AdminLog(db.Model):
 
 
 # ----------------- Before Request Handler -----------------
+# Global data storage for Vercel (in-memory)
+VERCEL_DATA = {
+    "users": [],
+    "expenses": [],
+    "categories": [],
+    "budgets": []
+}
+
 def ensure_database_ready():
     """Ensure database is ready for each request on Vercel"""
     if os.environ.get('VERCEL'):
@@ -272,50 +280,137 @@ def ensure_database_ready():
                 # Always create tables
                 db.create_all()
                 
-                # Ensure admin user exists
-                admin_email = "admin@expensetracker.com"
-                admin_user = User.query.filter_by(email=admin_email).first()
-                
-                if not admin_user:
-                    admin_user = User(
-                        username="admin",
-                        email=admin_email,
-                        password=generate_password_hash("admin123"),
-                        role="admin",
-                        is_active=True
-                    )
-                    db.session.add(admin_user)
-                    db.session.commit()
-                
-                # Ensure default categories exist
-                default_categories = [
-                    {"name": "Food", "color": "#ef4444", "icon": "🍕"},
-                    {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
-                    {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
-                    {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
-                    {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
-                ]
-                
-                for cat_data in default_categories:
-                    existing_cat = Category.query.filter_by(
-                        user_id=admin_user.id, 
-                        name=cat_data["name"]
-                    ).first()
+                # Initialize global data if empty
+                if not VERCEL_DATA["users"]:
+                    # Add admin user to global data
+                    admin_user_data = {
+                        "id": 1,
+                        "username": "admin",
+                        "email": "admin@expensetracker.com",
+                        "password": generate_password_hash("admin123"),
+                        "role": "admin",
+                        "is_active": True,
+                        "created_at": datetime.now(timezone.utc)
+                    }
+                    VERCEL_DATA["users"].append(admin_user_data)
                     
-                    if not existing_cat:
-                        category = Category(
-                            user_id=admin_user.id,
-                            name=cat_data["name"],
-                            color=cat_data["color"],
-                            icon=cat_data["icon"]
-                        )
-                        db.session.add(category)
+                    # Add default categories
+                    default_categories = [
+                        {"id": 1, "user_id": 1, "name": "Food", "color": "#ef4444", "icon": "🍕"},
+                        {"id": 2, "user_id": 1, "name": "Travel", "color": "#3b82f6", "icon": "🚗"},
+                        {"id": 3, "user_id": 1, "name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
+                        {"id": 4, "user_id": 1, "name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
+                        {"id": 5, "user_id": 1, "name": "Other", "color": "#8b5cf6", "icon": "📁"}
+                    ]
+                    VERCEL_DATA["categories"] = default_categories
                 
-                db.session.commit()
+                # Sync global data to database
+                sync_vercel_data_to_db()
                 
             except Exception as e:
                 print(f"Database initialization error: {e}")
                 db.session.rollback()
+
+def sync_vercel_data_to_db():
+    """Sync Vercel global data to database"""
+    try:
+        # Clear existing data
+        User.query.delete()
+        Category.query.delete()
+        Expense.query.delete()
+        Budget.query.delete()
+        db.session.commit()
+        
+        # Add users from global data
+        for user_data in VERCEL_DATA["users"]:
+            user = User(
+                username=user_data["username"],
+                email=user_data["email"],
+                password=user_data["password"],
+                role=user_data["role"],
+                is_active=user_data["is_active"],
+                created_at=user_data.get("created_at", datetime.now(timezone.utc))
+            )
+            db.session.add(user)
+        
+        # Add categories from global data
+        for cat_data in VERCEL_DATA["categories"]:
+            category = Category(
+                user_id=cat_data["user_id"],
+                name=cat_data["name"],
+                color=cat_data["color"],
+                icon=cat_data["icon"]
+            )
+            db.session.add(category)
+        
+        # Add expenses from global data
+        for exp_data in VERCEL_DATA["expenses"]:
+            expense = Expense(
+                user_id=exp_data["user_id"],
+                title=exp_data["title"],
+                amount=exp_data["amount"],
+                date=exp_data["date"],
+                category=exp_data["category"],
+                description=exp_data.get("description", ""),
+                payment_method=exp_data["payment_method"]
+            )
+            db.session.add(expense)
+        
+        db.session.commit()
+        
+    except Exception as e:
+        print(f"Sync error: {e}")
+        db.session.rollback()
+
+def sync_db_to_vercel_data():
+    """Sync database to Vercel global data"""
+    try:
+        # Clear global data
+        VERCEL_DATA["users"] = []
+        VERCEL_DATA["categories"] = []
+        VERCEL_DATA["expenses"] = []
+        VERCEL_DATA["budgets"] = []
+        
+        # Add users from database
+        users = User.query.all()
+        for user in users:
+            VERCEL_DATA["users"].append({
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "password": user.password,
+                "role": user.role,
+                "is_active": user.is_active,
+                "created_at": user.created_at
+            })
+        
+        # Add categories from database
+        categories = Category.query.all()
+        for category in categories:
+            VERCEL_DATA["categories"].append({
+                "id": category.id,
+                "user_id": category.user_id,
+                "name": category.name,
+                "color": category.color,
+                "icon": category.icon
+            })
+        
+        # Add expenses from database
+        expenses = Expense.query.all()
+        for expense in expenses:
+            VERCEL_DATA["expenses"].append({
+                "id": expense.id,
+                "user_id": expense.user_id,
+                "title": expense.title,
+                "amount": expense.amount,
+                "date": expense.date,
+                "category": expense.category,
+                "description": expense.description,
+                "payment_method": expense.payment_method
+            })
+        
+    except Exception as e:
+        print(f"Sync error: {e}")
 
 @app.before_request
 def before_request():
@@ -382,14 +477,29 @@ def register():
 
             # Create new user
             hashed_password = generate_password_hash(password)
-            new_user = User(
-                username=username,
-                email=email,
-                password=hashed_password
-            )
             
-            db.session.add(new_user)
-            db.session.commit()
+            if os.environ.get('VERCEL'):
+                # Add to Vercel data storage
+                user_data = {
+                    "id": len(VERCEL_DATA["users"]) + 1,
+                    "username": username,
+                    "email": email,
+                    "password": hashed_password,
+                    "role": "user",
+                    "is_active": True,
+                    "created_at": datetime.now(timezone.utc)
+                }
+                VERCEL_DATA["users"].append(user_data)
+                sync_vercel_data_to_db()
+            else:
+                # Add to database (local)
+                new_user = User(
+                    username=username,
+                    email=email,
+                    password=hashed_password
+                )
+                db.session.add(new_user)
+                db.session.commit()
             
             app.logger.info(f"New user registered: {username} ({email})")
             flash("Registration successful! Please log in.", "success")
@@ -1821,6 +1931,46 @@ def check_data():
             
     except Exception as e:
         return f"Check data error: {str(e)}"
+
+@app.route("/vercel-data")
+def vercel_data():
+    """View Vercel persistent data storage"""
+    try:
+        return f"""
+        <h2>Vercel Persistent Data Storage</h2>
+        <p><strong>Users ({len(VERCEL_DATA['users'])}):</strong></p>
+        <pre>{json.dumps(VERCEL_DATA['users'], indent=2, default=str)}</pre>
+        
+        <p><strong>Expenses ({len(VERCEL_DATA['expenses'])}):</strong></p>
+        <pre>{json.dumps(VERCEL_DATA['expenses'], indent=2, default=str)}</pre>
+        
+        <p><strong>Categories ({len(VERCEL_DATA['categories'])}):</strong></p>
+        <pre>{json.dumps(VERCEL_DATA['categories'], indent=2, default=str)}</pre>
+        
+        <p><a href="/sync-to-db">Sync to Database</a></p>
+        <p><a href="/sync-from-db">Sync from Database</a></p>
+        <p><a href="/check-data">Check Database</a></p>
+        """
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+@app.route("/sync-to-db")
+def sync_to_database():
+    """Sync Vercel data to database"""
+    try:
+        sync_vercel_data_to_db()
+        return "Data synced to database successfully!"
+    except Exception as e:
+        return f"Sync error: {str(e)}"
+
+@app.route("/sync-from-db")
+def sync_from_database():
+    """Sync database to Vercel data"""
+    try:
+        sync_db_to_vercel_data()
+        return "Data synced from database successfully!"
+    except Exception as e:
+        return f"Sync error: {str(e)}"
 
 # Initialize database on Vercel
 if os.environ.get('VERCEL'):
