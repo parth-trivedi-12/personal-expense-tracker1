@@ -579,6 +579,12 @@ def force_clear():
 def dashboard():
     user_id = session.get("user_id", 1)  # Default to 1 if not found
     
+    # AGGRESSIVELY clear all flash messages before processing
+    if '_flashes' in session:
+        session.pop('_flashes', None)
+    if hasattr(session, '_flashes'):
+        session._flashes = []
+    
     # Ensure database is ready on Vercel
     if os.environ.get('VERCEL'):
         ensure_database_ready()
@@ -1157,7 +1163,7 @@ def reports():
     except Exception as e:
         print(f"Error generating reports: {str(e)}")
         app.logger.error(f"Error generating reports: {str(e)}")
-        # Return empty data instead of redirecting with error
+        # Return empty data instead of redirecting with error - NO FLASH MESSAGE
         return render_template("reports.html", 
                              total_expenses=0,
                              budget_amount=0, 
