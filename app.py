@@ -35,24 +35,21 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 # Database configuration for different environments
 if os.environ.get('VERCEL'):
-    # Production environment (Vercel)
-    database_url = os.environ.get('DATABASE_URL', 'sqlite:///:memory:')
+    # Production environment (Vercel) - Use PostgreSQL
+    database_url = os.environ.get('DATABASE_URL')
     
-    if database_url.startswith('sqlite:///'):
-        # SQLite configuration for Vercel
-        if database_url == 'sqlite:///expense.db':
-            # Use in-memory database for Vercel (data will be lost between requests)
-            app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
-            print("⚠️  WARNING: Using in-memory SQLite database. Data will be lost between requests!")
-        else:
-            app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+    if not database_url:
+        # No DATABASE_URL provided, use in-memory (temporary)
+        app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+        print("⚠️  WARNING: No DATABASE_URL found. Using in-memory database. Data will be lost between requests!")
     elif database_url.startswith('postgres'):
         # PostgreSQL configuration
         if database_url.startswith('postgres://'):
             database_url = database_url.replace('postgres://', 'postgresql://', 1)
         app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+        print("✅ Using PostgreSQL database on Vercel")
     else:
-        # Fallback to in-memory SQLite
+        # Fallback to in-memory database
         app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
         print("⚠️  WARNING: Using in-memory SQLite database. Data will be lost between requests!")
 else:
@@ -1583,6 +1580,22 @@ def init_database():
                 app.logger.error(f"Database recreation failed: {str(e2)}")
                 print(f"Database recreation failed: {str(e2)}")
 
+def init_database_on_vercel():
+    """Initialize database specifically for Vercel deployment"""
+    with app.app_context():
+        try:
+            # Always create tables on Vercel to ensure they exist
+            db.create_all()
+            app.logger.info("Database tables created/verified on Vercel")
+            
+            # Create admin user
+            create_admin_user()
+            app.logger.info("Admin user ensured on Vercel")
+            
+        except Exception as e:
+            app.logger.error(f"Vercel database initialization failed: {str(e)}")
+            print(f"Vercel database initialization failed: {str(e)}")
+
 @app.route("/setup-admin")
 def setup_admin():
     """Setup admin user for Vercel deployment"""
@@ -1616,32 +1629,15 @@ def setup_admin():
 def init_database_endpoint():
     """Initialize database for Vercel deployment"""
     try:
-        # Create all tables
-        db.create_all()
-        
-        # Create admin user
-        admin_email = "admin@expensetracker.com"
-        admin_user = User.query.filter_by(email=admin_email).first()
-        
-        if admin_user:
-            admin_user.password = generate_password_hash("admin123")
-            admin_user.is_active = True
-            admin_user.role = "admin"
-            db.session.commit()
-            return f"Database initialized! Admin user updated: {admin_email} / admin123"
-        else:
-            admin_user = User(
-                username="admin",
-                email=admin_email,
-                password=generate_password_hash("admin123"),
-                role="admin",
-                is_active=True
-            )
-            db.session.add(admin_user)
-            db.session.commit()
-            return f"Database initialized! Admin user created: {admin_email} / admin123"
+        # Use the Vercel-specific initialization
+        init_database_on_vercel()
+        return f"Database initialized successfully! Admin: admin@expensetracker.com / admin123"
     except Exception as e:
         return f"Database initialization error: {str(e)}"
+
+# Initialize database on Vercel
+if os.environ.get('VERCEL'):
+    init_database_on_vercel()
 
 if __name__=="__main__":
     init_database()
