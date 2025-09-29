@@ -13,6 +13,11 @@
     }
   ],
   "env": {
-    "FLASK_APP": "app.py"
+    "SECRET_KEY": "@expense-tracker-secret-key"
+  },
+  "functions": {
+    "app.py": {
+      "maxDuration": 30
+    }
   }
 }

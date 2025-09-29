@@ -35,23 +35,16 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 # Database configuration for different environments
 if os.environ.get('VERCEL'):
-    # Production environment (Vercel) - Use PostgreSQL
-    database_url = os.environ.get('DATABASE_URL')
+    # Production environment (Vercel) - Use SQLite
+    database_url = os.environ.get('DATABASE_URL', 'sqlite:///:memory:')
     
-    if not database_url:
-        # No DATABASE_URL provided, use in-memory (temporary)
-        app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
-        print("⚠️  WARNING: No DATABASE_URL found. Using in-memory database. Data will be lost between requests!")
-    elif database_url.startswith('postgres'):
-        # PostgreSQL configuration
-        if database_url.startswith('postgres://'):
-            database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    if database_url.startswith('sqlite:///'):
         app.config["SQLALCHEMY_DATABASE_URI"] = database_url
-        print("✅ Using PostgreSQL database on Vercel")
+        print(f"✅ Using SQLite database on Vercel: {database_url}")
     else:
-        # Fallback to in-memory database
+        # Use in-memory SQLite as fallback
         app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
-        print("⚠️  WARNING: Using in-memory SQLite database. Data will be lost between requests!")
+        print("⚠️  Using in-memory SQLite on Vercel (data will be lost between requests)")
 else:
     # Local development environment
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(BASE_DIR, "expense.db")
@@ -273,7 +266,15 @@ class AdminLog(db.Model):
 # ----------------- Before Request Handler -----------------
 @app.before_request
 def before_request():
-    """Check session validity before each request"""
+    """Check session validity before each request and ensure database is initialized"""
+    # Ensure database is initialized on Vercel
+    if os.environ.get('VERCEL'):
+        try:
+            with app.app_context():
+                db.create_all()
+        except:
+            pass
+    
     if "user_id" in session:
         user = User.query.get(session["user_id"])
         if not user or not user.is_active:
@@ -1586,15 +1587,44 @@ def init_database_on_vercel():
         try:
             # Always create tables on Vercel to ensure they exist
             db.create_all()
-            app.logger.info("Database tables created/verified on Vercel")
+            app.logger.info("SQLite tables created/verified on Vercel")
             
             # Create admin user
             create_admin_user()
             app.logger.info("Admin user ensured on Vercel")
             
+            # Create default categories for admin
+            admin_user = User.query.filter_by(email="admin@expensetracker.com").first()
+            if admin_user:
+                default_categories = [
+                    {"name": "Food", "color": "#ef4444", "icon": "🍕"},
+                    {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
+                    {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
+                    {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
+                    {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
+                ]
+                
+                for cat_data in default_categories:
+                    existing_cat = Category.query.filter_by(
+                        user_id=admin_user.id, 
+                        name=cat_data["name"]
+                    ).first()
+                    
+                    if not existing_cat:
+                        category = Category(
+                            user_id=admin_user.id,
+                            name=cat_data["name"],
+                            color=cat_data["color"],
+                            icon=cat_data["icon"]
+                        )
+                        db.session.add(category)
+                
+                db.session.commit()
+                app.logger.info("Default categories created for admin")
+            
         except Exception as e:
-            app.logger.error(f"Vercel database initialization failed: {str(e)}")
-            print(f"Vercel database initialization failed: {str(e)}")
+            app.logger.error(f"Vercel SQLite initialization failed: {str(e)}")
+            print(f"Vercel SQLite initialization failed: {str(e)}")
 
 @app.route("/setup-admin")
 def setup_admin():
@@ -1631,9 +1661,25 @@ def init_database_endpoint():
     try:
         # Use the Vercel-specific initialization
         init_database_on_vercel()
-        return f"Database initialized successfully! Admin: admin@expensetracker.com / admin123"
+        return f"SQLite database initialized successfully! Admin: admin@expensetracker.com / admin123"
     except Exception as e:
         return f"Database initialization error: {str(e)}"
+
+@app.route("/reset-db")
+def reset_database():
+    """Reset database for Vercel deployment (useful for testing)"""
+    try:
+        with app.app_context():
+            # Drop and recreate all tables
+            db.drop_all()
+            db.create_all()
+            
+            # Initialize with admin user and categories
+            init_database_on_vercel()
+            
+        return f"SQLite database reset successfully! Admin: admin@expensetracker.com / admin123"
+    except Exception as e:
+        return f"Database reset error: {str(e)}"
 
 # Initialize database on Vercel
 if os.environ.get('VERCEL'):
