@@ -303,9 +303,9 @@ def ensure_database_ready():
                         {"id": 5, "user_id": 1, "name": "Other", "color": "#8b5cf6", "icon": "📁"}
                     ]
                     VERCEL_DATA["categories"] = default_categories
-                
-                # Sync global data to database
-                sync_vercel_data_to_db()
+                    
+                    # Sync global data to database only if data was initialized
+                    sync_vercel_data_to_db()
                 
             except Exception as e:
                 print(f"Database initialization error: {e}")
@@ -416,14 +416,28 @@ def sync_db_to_vercel_data():
 @app.before_request
 def before_request():
     """Check session validity before each request and ensure database is initialized"""
-    # Ensure database is ready on Vercel
-    ensure_database_ready()
+    # Only ensure database is ready on Vercel for specific routes that need it
+    if os.environ.get('VERCEL') and request.endpoint in ['admin_dashboard', 'admin_users', 'admin_user_detail']:
+        ensure_database_ready()
     
     if "user_id" in session:
-        user = User.query.get(session["user_id"])
-        if not user or not user.is_active:
-            session.clear()
-            flash("Your session has expired. Please log in again.", "info")
+        try:
+            user = User.query.get(session["user_id"])
+            if not user:
+                # User doesn't exist in database, clear session
+                session.clear()
+                flash("Your session has expired. Please log in again.", "info")
+            elif not user.is_active:
+                # User exists but is inactive, clear session
+                session.clear()
+                flash("Your account has been deactivated. Please contact support.", "danger")
+        except Exception as e:
+            # If there's a database error, don't clear the session immediately
+            print(f"Database error in before_request: {e}")
+            # Only clear session if it's a critical database error
+            if "no such table" in str(e).lower():
+                session.clear()
+                flash("Database error. Please log in again.", "danger")
 
 # ----------------- Routes -----------------
 @app.route("/")
@@ -2014,10 +2028,7 @@ cursor.execute("DELETE FROM user WHERE role != 'admin'")
 # Add users from Vercel data
 for user_data in users_data:
     if user_data['role'] != 'admin':  # Skip admin as it already exists
-        cursor.execute("""
-            INSERT INTO user (username, email, password, role, is_active, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
+        cursor.execute("INSERT INTO user (username, email, password, role, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?)", (
             user_data['username'],
             user_data['email'],
             user_data['password'],
@@ -2082,6 +2093,40 @@ def force_sync():
             return "This endpoint only works on Vercel"
     except Exception as e:
         return f"Force sync error: {str(e)}"
+
+@app.route("/session-status")
+def session_status():
+    """Check current session status"""
+    try:
+        session_info = {
+            "user_id": session.get("user_id"),
+            "username": session.get("username"),
+            "role": session.get("role"),
+            "permanent": session.permanent,
+            "is_vercel": bool(os.environ.get('VERCEL'))
+        }
+        
+        if session.get("user_id"):
+            try:
+                user = User.query.get(session["user_id"])
+                if user:
+                    session_info["user_exists"] = True
+                    session_info["user_active"] = user.is_active
+                    session_info["user_created"] = user.created_at.isoformat() if user.created_at else None
+                else:
+                    session_info["user_exists"] = False
+            except Exception as e:
+                session_info["user_query_error"] = str(e)
+        
+        return f"""
+        <h2>Session Status</h2>
+        <pre>{json.dumps(session_info, indent=2)}</pre>
+        
+        <p><a href="/dashboard">Go to Dashboard</a></p>
+        <p><a href="/logout">Logout</a></p>
+        """
+    except Exception as e:
+        return f"Session status error: {str(e)}"
 
 # Initialize database on Vercel
 if os.environ.get('VERCEL'):
