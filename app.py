@@ -264,16 +264,64 @@ class AdminLog(db.Model):
 
 
 # ----------------- Before Request Handler -----------------
+def ensure_database_ready():
+    """Ensure database is ready for each request on Vercel"""
+    if os.environ.get('VERCEL'):
+        with app.app_context():
+            try:
+                # Always create tables
+                db.create_all()
+                
+                # Ensure admin user exists
+                admin_email = "admin@expensetracker.com"
+                admin_user = User.query.filter_by(email=admin_email).first()
+                
+                if not admin_user:
+                    admin_user = User(
+                        username="admin",
+                        email=admin_email,
+                        password=generate_password_hash("admin123"),
+                        role="admin",
+                        is_active=True
+                    )
+                    db.session.add(admin_user)
+                    db.session.commit()
+                
+                # Ensure default categories exist
+                default_categories = [
+                    {"name": "Food", "color": "#ef4444", "icon": "🍕"},
+                    {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
+                    {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
+                    {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
+                    {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
+                ]
+                
+                for cat_data in default_categories:
+                    existing_cat = Category.query.filter_by(
+                        user_id=admin_user.id, 
+                        name=cat_data["name"]
+                    ).first()
+                    
+                    if not existing_cat:
+                        category = Category(
+                            user_id=admin_user.id,
+                            name=cat_data["name"],
+                            color=cat_data["color"],
+                            icon=cat_data["icon"]
+                        )
+                        db.session.add(category)
+                
+                db.session.commit()
+                
+            except Exception as e:
+                print(f"Database initialization error: {e}")
+                db.session.rollback()
+
 @app.before_request
 def before_request():
     """Check session validity before each request and ensure database is initialized"""
-    # Ensure database is initialized on Vercel
-    if os.environ.get('VERCEL'):
-        try:
-            with app.app_context():
-                db.create_all()
-        except:
-            pass
+    # Ensure database is ready on Vercel
+    ensure_database_ready()
     
     if "user_id" in session:
         user = User.query.get(session["user_id"])
@@ -1680,6 +1728,99 @@ def reset_database():
         return f"SQLite database reset successfully! Admin: admin@expensetracker.com / admin123"
     except Exception as e:
         return f"Database reset error: {str(e)}"
+
+@app.route("/export-data")
+def export_data():
+    """Export all data from Vercel database"""
+    try:
+        with app.app_context():
+            data = {
+                "users": [],
+                "expenses": [],
+                "categories": [],
+                "budgets": []
+            }
+            
+            # Export users
+            users = User.query.all()
+            for user in users:
+                data["users"].append({
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "role": user.role,
+                    "is_active": user.is_active,
+                    "created_at": user.created_at.isoformat() if user.created_at else None
+                })
+            
+            # Export expenses
+            expenses = Expense.query.all()
+            for expense in expenses:
+                data["expenses"].append({
+                    "id": expense.id,
+                    "user_id": expense.user_id,
+                    "title": expense.title,
+                    "amount": expense.amount,
+                    "date": expense.date.isoformat() if expense.date else None,
+                    "category": expense.category,
+                    "description": expense.description,
+                    "payment_method": expense.payment_method
+                })
+            
+            # Export categories
+            categories = Category.query.all()
+            for category in categories:
+                data["categories"].append({
+                    "id": category.id,
+                    "user_id": category.user_id,
+                    "name": category.name,
+                    "color": category.color,
+                    "icon": category.icon
+                })
+            
+            return json.dumps(data, indent=2)
+            
+    except Exception as e:
+        return f"Export error: {str(e)}"
+
+@app.route("/check-data")
+def check_data():
+    """Check current data in Vercel database"""
+    try:
+        with app.app_context():
+            user_count = User.query.count()
+            expense_count = Expense.query.count()
+            category_count = Category.query.count()
+            budget_count = Budget.query.count()
+            
+            users = User.query.all()
+            user_list = []
+            for user in users:
+                user_list.append({
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "role": user.role,
+                    "is_active": user.is_active
+                })
+            
+            return f"""
+            <h2>Vercel Database Status</h2>
+            <p><strong>Users:</strong> {user_count}</p>
+            <p><strong>Expenses:</strong> {expense_count}</p>
+            <p><strong>Categories:</strong> {category_count}</p>
+            <p><strong>Budgets:</strong> {budget_count}</p>
+            
+            <h3>Users:</h3>
+            <pre>{json.dumps(user_list, indent=2)}</pre>
+            
+            <p><a href="/export-data">Export All Data</a></p>
+            <p><a href="/init-db">Initialize Database</a></p>
+            <p><a href="/reset-db">Reset Database</a></p>
+            """
+            
+    except Exception as e:
+        return f"Check data error: {str(e)}"
 
 # Initialize database on Vercel
 if os.environ.get('VERCEL'):
