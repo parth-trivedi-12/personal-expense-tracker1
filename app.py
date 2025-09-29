@@ -556,6 +556,13 @@ def clear_session():
     session.clear()
     return redirect(url_for("home"))
 
+@app.route("/clear-flashes")
+def clear_flashes():
+    """Clear all flash messages"""
+    if '_flashes' in session:
+        session.pop('_flashes', None)
+    return redirect(url_for("dashboard"))
+
 # ----------------- Dashboard -----------------
 @app.route("/dashboard")
 @user_only
@@ -1140,8 +1147,12 @@ def reports():
     except Exception as e:
         print(f"Error generating reports: {str(e)}")
         app.logger.error(f"Error generating reports: {str(e)}")
-        flash("An error occurred while generating reports. Please try again.", "danger")
-        return redirect(url_for("dashboard"))
+        # Return empty data instead of redirecting with error
+        return render_template("reports.html", 
+                             total_expenses=0,
+                             budget_amount=0, 
+                             remaining=0,
+                             expenses_by_category={})
 
 # ----------------- Export CSV -----------------
 @app.route("/export/csv")
