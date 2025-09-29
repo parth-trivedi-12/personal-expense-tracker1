@@ -120,21 +120,15 @@ def login_required(f):
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
         
-        # Only check user existence, don't clear session on errors
+        # Simple check - only clear session if user doesn't exist
         try:
             user = User.query.get(session["user_id"])
             if not user:
                 session.clear()
                 flash("Your session has expired. Please log in again.", "danger")
                 return redirect(url_for("login"))
-            
-            if not user.is_active:
-                session.clear()
-                flash("Your account has been deactivated. Please contact support.", "danger")
-                return redirect(url_for("login"))
-        except Exception as e:
-            print(f"Database error in login_required: {e}")
-            # Don't clear session on database errors - just continue
+        except:
+            # Database error - don't clear session, just continue
             pass
         
         return f(*args, **kwargs)
@@ -148,7 +142,7 @@ def admin_required(f):
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
         
-        # Only check user existence and role, don't clear session on errors
+        # Simple check - only clear session if user doesn't exist
         try:
             user = User.query.get(session["user_id"])
             if not user:
@@ -156,17 +150,11 @@ def admin_required(f):
                 flash("Your session has expired. Please log in again.", "danger")
                 return redirect(url_for("login"))
             
-            if not user.is_active:
-                session.clear()
-                flash("Your account has been deactivated. Please contact support.", "danger")
-                return redirect(url_for("login"))
-            
             if user.role != 'admin':
                 flash("Access denied. Admin privileges required.", "danger")
                 return redirect(url_for("dashboard"))
-        except Exception as e:
-            print(f"Database error in admin_required: {e}")
-            # Don't clear session on database errors - just continue
+        except:
+            # Database error - don't clear session, just continue
             pass
         
         return f(*args, **kwargs)
@@ -180,7 +168,7 @@ def user_only(f):
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
         
-        # Only check user existence and role, don't clear session on errors
+        # Simple check - only clear session if user doesn't exist
         try:
             user = User.query.get(session["user_id"])
             if not user:
@@ -188,17 +176,11 @@ def user_only(f):
                 flash("Your session has expired. Please log in again.", "danger")
                 return redirect(url_for("login"))
             
-            if not user.is_active:
-                session.clear()
-                flash("Your account has been deactivated. Please contact support.", "danger")
-                return redirect(url_for("login"))
-            
             if user.role == 'admin':
                 flash("Access denied. This page is for regular users only.", "danger")
                 return redirect(url_for("admin_dashboard"))
-        except Exception as e:
-            print(f"Database error in user_only: {e}")
-            # Don't clear session on database errors - just continue
+        except:
+            # Database error - don't clear session, just continue
             pass
         
         return f(*args, **kwargs)
@@ -452,33 +434,26 @@ def before_request():
     if os.environ.get('VERCEL') and request.endpoint in ['admin_dashboard', 'admin_users', 'admin_user_detail']:
         ensure_database_ready()
     
-    # Simple session check - only clear session if user_id exists but user doesn't exist
-    if "user_id" in session:
-        try:
-            user = User.query.get(session["user_id"])
-            if not user:
-                # User doesn't exist, clear session
-                session.clear()
-                flash("Your session has expired. Please log in again.", "info")
-        except Exception as e:
-            # Database error - don't clear session, just log it
-            print(f"Database error in before_request: {e}")
-            pass
+    # No session validation in before_request - let decorators handle it
 
 # ----------------- Routes -----------------
 @app.route("/")
 def home():
     if "user_id" in session:
-        user = User.query.get(session["user_id"])
-        if user and user.is_active:
-            if user.role == 'admin':
-                return redirect(url_for("admin_dashboard"))
+        try:
+            user = User.query.get(session["user_id"])
+            if user:
+                if user.role == 'admin':
+                    return redirect(url_for("admin_dashboard"))
+                else:
+                    return redirect(url_for("dashboard"))
             else:
-                return redirect(url_for("dashboard"))
-        else:
-            # User not found or inactive, clear session
-            session.clear()
-            flash("Your session has expired. Please log in again.", "info")
+                # User not found, clear session
+                session.clear()
+                flash("Your session has expired. Please log in again.", "info")
+        except:
+            # Database error - don't clear session
+            pass
     return render_template("index.html", app=app)
 
 @app.route("/register", methods=["GET","POST"])
