@@ -35,6 +35,7 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 # Database configuration for different environments
 database_url = os.environ.get('DATABASE_URL')
+app.logger.info(f"DATABASE_URL: {database_url}")
 
 if database_url:
     # Use provided DATABASE_URL (Supabase, Neon.tech, or other PostgreSQL)
