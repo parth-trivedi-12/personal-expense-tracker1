@@ -1423,8 +1423,94 @@ def create_admin_user():
         app.logger.error(f"Error creating admin user: {str(e)}")
         print(f"❌ Error creating admin user: {str(e)}")
 
+def safe_add_column(table_name, column_name, column_type, default_value=None):
+    """Safely add a column to an existing table without losing data"""
+    try:
+        inspector = db.inspect(db.engine)
+        existing_columns = [col['name'] for col in inspector.get_columns(table_name)]
+        
+        if column_name not in existing_columns:
+            app.logger.info(f"Adding column {column_name} to table {table_name}")
+            
+            # Use raw SQL to add column safely
+            if default_value is not None:
+                if isinstance(default_value, str):
+                    db.session.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type} DEFAULT '{default_value}'")
+                else:
+                    db.session.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type} DEFAULT {default_value}")
+            else:
+                db.session.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+            
+            db.session.commit()
+            app.logger.info(f"Successfully added column {column_name} to {table_name}")
+            return True
+        else:
+            app.logger.info(f"Column {column_name} already exists in {table_name}")
+            return False
+    except Exception as e:
+        app.logger.error(f"Error adding column {column_name} to {table_name}: {str(e)}")
+        db.session.rollback()
+        return False
+
+def backup_user_data():
+    """Create a backup of user data before any destructive operations"""
+    try:
+        users = User.query.all()
+        backup_data = []
+        for user in users:
+            user_data = {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'password': user.password,
+                'created_at': getattr(user, 'created_at', None),
+                'last_login': getattr(user, 'last_login', None),
+                'is_active': getattr(user, 'is_active', True),
+                'role': getattr(user, 'role', 'user')
+            }
+            backup_data.append(user_data)
+        
+        app.logger.info(f"Backed up {len(backup_data)} users")
+        return backup_data
+    except Exception as e:
+        app.logger.error(f"Error creating user backup: {str(e)}")
+        return []
+
+def restore_user_data(backup_data):
+    """Restore user data from backup"""
+    try:
+        for user_data in backup_data:
+            # Check if user already exists
+            existing_user = User.query.get(user_data['id'])
+            if not existing_user:
+                user = User(
+                    id=user_data['id'],
+                    username=user_data['username'],
+                    email=user_data['email'],
+                    password=user_data['password']
+                )
+                # Add new columns if they exist in backup
+                if 'created_at' in user_data and user_data['created_at']:
+                    user.created_at = user_data['created_at']
+                if 'last_login' in user_data and user_data['last_login']:
+                    user.last_login = user_data['last_login']
+                if 'is_active' in user_data:
+                    user.is_active = user_data['is_active']
+                if 'role' in user_data:
+                    user.role = user_data['role']
+                
+                db.session.add(user)
+        
+        db.session.commit()
+        app.logger.info(f"Restored {len(backup_data)} users from backup")
+        return True
+    except Exception as e:
+        app.logger.error(f"Error restoring user data: {str(e)}")
+        db.session.rollback()
+        return False
+
 def init_database():
-    """Initialize database with proper migration"""
+    """Initialize database with safe migration that preserves data"""
     with app.app_context():
         try:
             # Check if tables exist
@@ -1435,12 +1521,49 @@ def init_database():
                 # Check if new columns exist
                 user_columns = [col['name'] for col in inspector.get_columns('user')]
                 
-                # If new columns don't exist, drop and recreate tables
-                if 'created_at' not in user_columns or 'last_login' not in user_columns or 'is_active' not in user_columns or 'role' not in user_columns:
-                    app.logger.info("Database schema outdated, recreating tables...")
-                    db.drop_all()
-                    db.create_all()
-                    app.logger.info("Database recreated with new schema")
+                # Check if we need to add any missing columns
+                missing_columns = []
+                if 'created_at' not in user_columns:
+                    missing_columns.append(('created_at', 'DATETIME', 'CURRENT_TIMESTAMP'))
+                if 'last_login' not in user_columns:
+                    missing_columns.append(('last_login', 'DATETIME', None))
+                if 'is_active' not in user_columns:
+                    missing_columns.append(('is_active', 'BOOLEAN', True))
+                if 'role' not in user_columns:
+                    missing_columns.append(('role', 'VARCHAR(20)', "'user'"))
+                
+                if missing_columns:
+                    app.logger.info(f"Database schema needs updates. Adding {len(missing_columns)} missing columns...")
+                    
+                    # Create backup before making changes
+                    backup_data = backup_user_data()
+                    
+                    # Add missing columns safely
+                    for column_name, column_type, default_value in missing_columns:
+                        safe_add_column('user', column_name, column_type, default_value)
+                    
+                    # Update existing users with default values for new columns
+                    if missing_columns:
+                        users = User.query.all()
+                        for user in users:
+                            updated = False
+                            if 'created_at' not in user_columns and not hasattr(user, 'created_at'):
+                                user.created_at = datetime.now(timezone.utc)
+                                updated = True
+                            if 'is_active' not in user_columns and not hasattr(user, 'is_active'):
+                                user.is_active = True
+                                updated = True
+                            if 'role' not in user_columns and not hasattr(user, 'role'):
+                                user.role = 'user'
+                                updated = True
+                            
+                            if updated:
+                                db.session.add(user)
+                        
+                        db.session.commit()
+                        app.logger.info("Updated existing users with default values for new columns")
+                    
+                    app.logger.info("Database schema updated successfully while preserving all data")
                 else:
                     app.logger.info("Database schema is up to date")
             else:
@@ -1454,15 +1577,33 @@ def init_database():
         except Exception as e:
             app.logger.error(f"Database initialization failed: {str(e)}")
             print(f"Database initialization failed: {str(e)}")
-            # Try to recreate database
+            
+            # Only as a last resort, try to recreate database
+            # But first warn the user about data loss
+            print("⚠️  WARNING: Database initialization failed. Attempting to recreate database...")
+            print("⚠️  This will result in DATA LOSS if there was existing data!")
+            
             try:
+                # Check if there are any users before dropping
+                try:
+                    user_count = User.query.count()
+                    if user_count > 0:
+                        print(f"⚠️  WARNING: Found {user_count} existing users. Data will be lost!")
+                        response = input("Do you want to continue? This will DELETE ALL DATA! (yes/no): ")
+                        if response.lower() != 'yes':
+                            print("Database recreation cancelled.")
+                            return
+                except:
+                    pass  # If we can't check, proceed with recreation
+                
                 db.drop_all()
                 db.create_all()
                 app.logger.info("Database recreated after error")
                 create_admin_user()
+                print("✅ Database recreated successfully")
             except Exception as e2:
                 app.logger.error(f"Database recreation failed: {str(e2)}")
-                print(f"Database recreation failed: {str(e2)}")
+                print(f"❌ Database recreation failed: {str(e2)}")
 
 if __name__=="__main__":
     init_database()
