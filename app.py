@@ -44,23 +44,25 @@ if database_url:
     
     if database_url.startswith('postgresql://') or database_url.startswith('postgresql+pg8000://'):
         # PostgreSQL configuration (Supabase, Neon.tech, etc.)
-        # For pg8000 driver, we need to use ssl_context instead of sslmode parameter
+        # Ensure we use pg8000 driver for Vercel compatibility
+        if database_url.startswith('postgresql://') and not database_url.startswith('postgresql+pg8000://'):
+            # Convert to pg8000 driver for Vercel
+            database_url = database_url.replace('postgresql://', 'postgresql+pg8000://', 1)
+        
+        # For pg8000 driver, SSL is handled differently
         if database_url.startswith('postgresql+pg8000://'):
-            # Convert to standard postgresql:// for pg8000 with SSL
-            database_url = database_url.replace('postgresql+pg8000://', 'postgresql://', 1)
-        
-        # Add SSL requirement for cloud PostgreSQL providers
-        # Check if sslmode is already present to avoid duplication
-        if 'sslmode=' not in database_url:
-            if '?' in database_url:
-                # URL already has parameters, add sslmode
-                database_url += '&sslmode=require'
-            else:
-                # URL has no parameters, add sslmode
-                database_url += '?sslmode=require'
-        
-        app.config["SQLALCHEMY_DATABASE_URI"] = database_url
-        app.logger.info("✅ Using PostgreSQL database (Supabase/Neon.tech) with SSL")
+            # pg8000 doesn't support sslmode parameter, SSL is enabled by default for cloud providers
+            app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+            app.logger.info("✅ Using PostgreSQL database (Supabase/Neon.tech) with pg8000 driver")
+        else:
+            # For other drivers, add SSL requirement
+            if 'sslmode=' not in database_url:
+                if '?' in database_url:
+                    database_url += '&sslmode=require'
+                else:
+                    database_url += '?sslmode=require'
+            app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+            app.logger.info("✅ Using PostgreSQL database (Supabase/Neon.tech) with SSL")
     elif database_url.startswith('sqlite:///'):
         # SQLite configuration
         if database_url == 'sqlite:///expense.db' and os.environ.get('VERCEL'):
