@@ -52,7 +52,26 @@ if database_url:
         # For pg8000 driver, SSL is handled differently
         if database_url.startswith('postgresql+pg8000://'):
             # pg8000 doesn't support sslmode parameter, SSL is enabled by default for cloud providers
+            # Remove any sslmode parameters that might be present
+            if '?' in database_url:
+                # Split URL and parameters
+                url_parts = database_url.split('?')
+                base_url = url_parts[0]
+                if len(url_parts) > 1:
+                    # Remove sslmode parameter from query string
+                    params = url_parts[1].split('&')
+                    filtered_params = [p for p in params if not p.startswith('sslmode=')]
+                    if filtered_params:
+                        database_url = base_url + '?' + '&'.join(filtered_params)
+                    else:
+                        database_url = base_url
+            
+            # Configure SQLAlchemy to use pg8000 with minimal connection parameters
             app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+            app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+                "pool_pre_ping": True,
+                "pool_recycle": 300
+            }
             app.logger.info("✅ Using PostgreSQL database (Supabase/Neon.tech) with pg8000 driver")
         else:
             # For other drivers, add SSL requirement
