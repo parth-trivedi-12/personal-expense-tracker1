@@ -22,6 +22,12 @@ app = Flask(__name__)
 # Generate secure secret key
 app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
 
+# Session configuration
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # 24 hours session timeout
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'  # HTTPS only in production
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent XSS attacks
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
+
 # Initialize CSRF protection
 csrf = CSRFProtect(app)
 
@@ -42,9 +48,11 @@ if database_url:
     elif database_url.startswith('sqlite:///'):
         # SQLite configuration
         if database_url == 'sqlite:///expense.db' and os.environ.get('VERCEL'):
-            # Use in-memory database for Vercel (data will be lost between requests)
-            app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
-            print("⚠️  WARNING: Using in-memory SQLite database. Data will be lost between requests!")
+            # Use persistent SQLite file for Vercel (better than in-memory)
+            app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join("/tmp", "expense.db")
+            app.logger.info("✅ Using persistent SQLite database file on Vercel")
+            app.logger.warning("⚠️  NOTE: File system is ephemeral on Vercel - data may be lost during deployments")
+            app.logger.info("💡 RECOMMENDATION: For production, use PostgreSQL or cloud SQLite (Turso/LibSQL)")
         else:
             app.config["SQLALCHEMY_DATABASE_URI"] = database_url
             app.logger.info("✅ Using SQLite database")
@@ -131,6 +139,17 @@ def login_required(f):
         if "user_id" not in session:
             flash("Please log in to access this page.", "danger")
             return redirect(url_for("login"))
+        
+        # Verify user still exists in database
+        user = User.query.get(session["user_id"])
+        if not user or not user.is_active:
+            session.clear()
+            flash("Your session has expired. Please log in again.", "warning")
+            return redirect(url_for("login"))
+        
+        # Refresh session to prevent timeout during active use
+        session.permanent = True
+        
         return f(*args, **kwargs)
     return decorated_function
 
@@ -143,7 +162,12 @@ def admin_required(f):
             return redirect(url_for("login"))
         
         user = User.query.get(session["user_id"])
-        if not user or user.role != 'admin':
+        if not user or not user.is_active:
+            session.clear()
+            flash("Your session has expired. Please log in again.", "warning")
+            return redirect(url_for("login"))
+        
+        if user.role != 'admin':
             flash("Access denied. Admin privileges required.", "danger")
             return redirect(url_for("dashboard"))
         
@@ -159,8 +183,9 @@ def user_only(f):
             return redirect(url_for("login"))
         
         user = User.query.get(session["user_id"])
-        if not user:
-            flash("User not found.", "danger")
+        if not user or not user.is_active:
+            session.clear()
+            flash("Your session has expired. Please log in again.", "warning")
             return redirect(url_for("login"))
         
         if user.role == 'admin':
@@ -370,6 +395,7 @@ def login():
                 session["user_id"] = user.id
                 session["username"] = user.username
                 session["role"] = user.role
+                session.permanent = True  # Make session permanent (24 hours)
                 
                 app.logger.info(f"User logged in: {user.username} ({email}) - Role: {user.role}")
                 flash("Login successful!", "success")
