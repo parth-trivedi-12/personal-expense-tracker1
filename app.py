@@ -31,14 +31,14 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 database_url = os.environ.get('DATABASE_URL')
 
 if database_url:
-    # Use provided DATABASE_URL (Supabase or other PostgreSQL)
+    # Use provided DATABASE_URL (Supabase, Neon.tech, or other PostgreSQL)
     if database_url.startswith('postgres://'):
         database_url = database_url.replace('postgres://', 'postgresql://', 1)
     
     if database_url.startswith('postgresql://') or database_url.startswith('postgresql+pg8000://'):
-        # PostgreSQL configuration (Supabase)
+        # PostgreSQL configuration (Supabase, Neon.tech, etc.)
         app.config["SQLALCHEMY_DATABASE_URI"] = database_url
-        print("✅ Using PostgreSQL database (Supabase)")
+        print("✅ Using PostgreSQL database (Supabase/Neon.tech)")
     elif database_url.startswith('sqlite:///'):
         # SQLite configuration
         if database_url == 'sqlite:///expense.db' and os.environ.get('VERCEL'):
