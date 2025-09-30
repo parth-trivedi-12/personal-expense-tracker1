@@ -3,6 +3,8 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta, timezone
+import certifi
+import ssl
 import os
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
@@ -35,7 +37,8 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 # Database configuration for different environments
 database_url = os.environ.get('DATABASE_URL')
-app.logger.info(f"DATABASE_URL: {database_url}")
+if database_url:
+    app.logger.info("DATABASE_URL detected; configuring database connection.")
 
 if database_url:
     # Use provided DATABASE_URL (Supabase, Neon.tech, or other PostgreSQL)
@@ -65,16 +68,20 @@ if database_url:
                         database_url = base_url + '?' + '&'.join(filtered_params)
                     else:
                         database_url = base_url
-            
-            # pg8000 handles SSL via ssl_context, not URL parameters
-            
+
+            # Configure SSL context for Supabase
+            ssl_context = ssl.create_default_context()
+            ssl_context.load_verify_locations(certifi.where())
+            ssl_context.check_hostname = True
+            ssl_context.verify_mode = ssl.CERT_REQUIRED
+
             # Configure SQLAlchemy to use pg8000 with SSL
             app.config["SQLALCHEMY_DATABASE_URI"] = database_url
             app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
                 "pool_pre_ping": True,
                 "pool_recycle": 300,
                 "connect_args": {
-                    "ssl_context": True
+                    "ssl_context": ssl_context
                 }
             }
             app.logger.info("✅ Using PostgreSQL database (Supabase/Neon.tech) with pg8000 driver and SSL")
