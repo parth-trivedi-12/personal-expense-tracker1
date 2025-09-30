@@ -38,7 +38,7 @@ if database_url:
     if database_url.startswith('postgresql://') or database_url.startswith('postgresql+pg8000://'):
         # PostgreSQL configuration (Supabase, Neon.tech, etc.)
         app.config["SQLALCHEMY_DATABASE_URI"] = database_url
-        print("✅ Using PostgreSQL database (Supabase/Neon.tech)")
+        app.logger.info("✅ Using PostgreSQL database (Supabase/Neon.tech)")
     elif database_url.startswith('sqlite:///'):
         # SQLite configuration
         if database_url == 'sqlite:///expense.db' and os.environ.get('VERCEL'):
@@ -47,15 +47,15 @@ if database_url:
             print("⚠️  WARNING: Using in-memory SQLite database. Data will be lost between requests!")
         else:
             app.config["SQLALCHEMY_DATABASE_URI"] = database_url
-            print("✅ Using SQLite database")
+            app.logger.info("✅ Using SQLite database")
     else:
         # Fallback to in-memory SQLite
         app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
-        print("⚠️  WARNING: Using in-memory SQLite database. Data will be lost between requests!")
+        app.logger.warning("⚠️  WARNING: Using in-memory SQLite database. Data will be lost between requests!")
 else:
     # Local development environment - default to SQLite
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(BASE_DIR, "expense.db")
-    print("✅ Using local SQLite database for development")
+    app.logger.info("✅ Using local SQLite database for development")
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
