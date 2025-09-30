@@ -28,30 +28,34 @@ csrf = CSRFProtect(app)
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 # Database configuration for different environments
-if os.environ.get('VERCEL'):
-    # Production environment (Vercel)
-    database_url = os.environ.get('DATABASE_URL', 'sqlite:///:memory:')
+database_url = os.environ.get('DATABASE_URL')
+
+if database_url:
+    # Use provided DATABASE_URL (Supabase or other PostgreSQL)
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
     
-    if database_url.startswith('sqlite:///'):
-        # SQLite configuration for Vercel
-        if database_url == 'sqlite:///expense.db':
+    if database_url.startswith('postgresql://'):
+        # PostgreSQL configuration (Supabase)
+        app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+        print("✅ Using PostgreSQL database (Supabase)")
+    elif database_url.startswith('sqlite:///'):
+        # SQLite configuration
+        if database_url == 'sqlite:///expense.db' and os.environ.get('VERCEL'):
             # Use in-memory database for Vercel (data will be lost between requests)
             app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
             print("⚠️  WARNING: Using in-memory SQLite database. Data will be lost between requests!")
         else:
             app.config["SQLALCHEMY_DATABASE_URI"] = database_url
-    elif database_url.startswith('postgres'):
-        # PostgreSQL configuration
-        if database_url.startswith('postgres://'):
-            database_url = database_url.replace('postgres://', 'postgresql://', 1)
-        app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+            print("✅ Using SQLite database")
     else:
         # Fallback to in-memory SQLite
         app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
         print("⚠️  WARNING: Using in-memory SQLite database. Data will be lost between requests!")
 else:
-    # Local development environment
+    # Local development environment - default to SQLite
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(BASE_DIR, "expense.db")
+    print("✅ Using local SQLite database for development")
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
