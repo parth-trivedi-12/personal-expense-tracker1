@@ -241,3 +241,4 @@ vercel --debug
 - [ ] Set up custom domain (optional)
 
 Your Personal Expense Tracker should now be live on Vercel! 🚀
+
