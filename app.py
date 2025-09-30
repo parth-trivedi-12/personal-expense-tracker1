@@ -35,7 +35,7 @@ if database_url:
     if database_url.startswith('postgres://'):
         database_url = database_url.replace('postgres://', 'postgresql://', 1)
     
-    if database_url.startswith('postgresql://'):
+    if database_url.startswith('postgresql://') or database_url.startswith('postgresql+pg8000://'):
         # PostgreSQL configuration (Supabase)
         app.config["SQLALCHEMY_DATABASE_URI"] = database_url
         print("✅ Using PostgreSQL database (Supabase)")
