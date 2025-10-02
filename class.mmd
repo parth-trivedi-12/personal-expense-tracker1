@@ -3,10 +3,15 @@ classDiagram
 
     %% ---------------- User ----------------
     class User {
-        [PK] user_id : int
+        [PK] id : int
         username : string
         email : string
         password : string
+        created_at : datetime
+        last_login : datetime
+        is_active : boolean
+        role : string
+        last_admin_action : datetime
 
         register()
         login()
@@ -16,25 +21,29 @@ classDiagram
 
     %% ---------------- Admin ----------------
     class Admin {
-        [PK] admin_id : int
+        [PK] id : int
         [FK] user_id : int
         permissions : string
         last_login : datetime
 
         manageUsers()
         viewReports()
+        deleteUsers()
+        exportData()
     }
 
     %% ---------------- Expense ----------------
     class Expense {
-        [PK] expense_id : int
+        [PK] id : int
         [FK] user_id : int
-        [FK] category_id : int
         title : string
         amount : float
         date : date
-        payment_method : string
+        category : string
         description : string
+        payment_method : string
+        created_at : datetime
+        updated_at : datetime
 
         addExpense()
         editExpense()
@@ -44,9 +53,12 @@ classDiagram
 
     %% ---------------- Category ----------------
     class Category {
-        [PK] category_id : int
+        [PK] id : int
+        [FK] user_id : int
         name : string
-        description : string
+        color : string
+        icon : string
+        created_at : datetime
 
         addCategory()
         editCategory()
@@ -56,11 +68,13 @@ classDiagram
 
     %% ---------------- Budget ----------------
     class Budget {
-        [PK] budget_id : int
+        [PK] id : int
         [FK] user_id : int
         amount : float
         start_date : date
         end_date : date
+        created_at : datetime
+        updated_at : datetime
 
         setBudget()
         updateBudget()
@@ -70,7 +84,7 @@ classDiagram
 
     %% ---------------- Report ----------------
     class Report {
-        [PK] report_id : int
+        [PK] id : int
         [FK] user_id : int
         start_date : date
         end_date : date
@@ -84,10 +98,21 @@ classDiagram
     }
 
     %% ---------------- Relationships ----------------
-    User "1" --> "0..*" Expense : records
-    Category "1" --> "1..*" Expense : categorizes
-    User "1" --> "0..1" Budget : owns
-    User "1" --> "0..*" Report : generates
-    Admin "1" --> "1..*" User : manages
-    Report "1" --> "0..*" Expense : summarizes
-    Budget "1" --> "1..*" Expense : monitors
+    %% User relationships
+    User "1" --> "0..*" Expense : "records"
+    User "1" --> "0..*" Category : "creates"
+    User "1" --> "0..1" Budget : "owns"
+    User "1" --> "0..*" Report : "generates"
+    
+    %% Admin relationships
+    Admin "1" --> "1" User : "is_a"
+    Admin "1" --> "0..*" User : "manages"
+    
+    %% Category relationships
+    Category "1" --> "0..*" Expense : "categorizes"
+    
+    %% Budget relationships
+    Budget "1" --> "0..*" Expense : "monitors"
+    
+    %% Report relationships
+    Report "1" --> "0..*" Expense : "summarizes"

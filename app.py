@@ -3,6 +3,8 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta, timezone
+import certifi
+import ssl
 import os
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
@@ -24,9 +26,9 @@ app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
 
 # Session configuration
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # 24 hours session timeout
-app.config['SESSION_COOKIE_SECURE'] = False  # Set to True in production with HTTPS
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'  # HTTPS only in production
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent XSS attacks
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
 
 # Initialize CSRF protection
 csrf = CSRFProtect(app)
@@ -34,20 +36,83 @@ csrf = CSRFProtect(app)
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 # Database configuration for different environments
-if os.environ.get('VERCEL'):
-    # Production environment (Vercel) - Use SQLite
-    database_url = os.environ.get('DATABASE_URL', 'sqlite:///:memory:')
+database_url = os.environ.get('DATABASE_URL')
+if database_url:
+    app.logger.info("DATABASE_URL detected; configuring database connection.")
+
+if database_url:
+    # Use provided DATABASE_URL (Supabase, Neon.tech, or other PostgreSQL)
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
     
-    if database_url.startswith('sqlite:///'):
-        app.config["SQLALCHEMY_DATABASE_URI"] = database_url
-        print(f"✅ Using SQLite database on Vercel: {database_url}")
+    if database_url.startswith('postgresql://') or database_url.startswith('postgresql+pg8000://'):
+        # PostgreSQL configuration (Supabase, Neon.tech, etc.)
+        # Ensure we use pg8000 driver for Vercel compatibility
+        if database_url.startswith('postgresql://') and not database_url.startswith('postgresql+pg8000://'):
+            # Convert to pg8000 driver for Vercel
+            database_url = database_url.replace('postgresql://', 'postgresql+pg8000://', 1)
+        
+        # For pg8000 driver, SSL is handled differently
+        if database_url.startswith('postgresql+pg8000://'):
+            # pg8000 requires SSL configuration for cloud providers
+            # Remove any existing sslmode parameters and add proper SSL config
+            if '?' in database_url:
+                # Split URL and parameters
+                url_parts = database_url.split('?')
+                base_url = url_parts[0]
+                if len(url_parts) > 1:
+                    # Remove sslmode parameter from query string
+                    params = url_parts[1].split('&')
+                    filtered_params = [p for p in params if not p.startswith('sslmode=')]
+                    if filtered_params:
+                        database_url = base_url + '?' + '&'.join(filtered_params)
+                    else:
+                        database_url = base_url
+
+            # Configure SSL context for Supabase
+            ssl_context = ssl.create_default_context()
+            ssl_context.load_verify_locations(certifi.where())
+            ssl_context.check_hostname = True
+            ssl_context.verify_mode = ssl.CERT_REQUIRED
+
+            # Configure SQLAlchemy to use pg8000 with SSL
+            app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+            app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+                "pool_pre_ping": True,
+                "pool_recycle": 300,
+                "connect_args": {
+                    "ssl_context": ssl_context
+                }
+            }
+            app.logger.info("✅ Using PostgreSQL database (Supabase/Neon.tech) with pg8000 driver and SSL")
+        else:
+            # For other drivers, add SSL requirement
+            if 'sslmode=' not in database_url:
+                if '?' in database_url:
+                    database_url += '&sslmode=require'
+                else:
+                    database_url += '?sslmode=require'
+            app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+            app.logger.info("✅ Using PostgreSQL database (Supabase/Neon.tech) with SSL")
+    elif database_url.startswith('sqlite:///'):
+        # SQLite configuration
+        if database_url == 'sqlite:///expense.db' and os.environ.get('VERCEL'):
+            # Use persistent SQLite file for Vercel (better than in-memory)
+            app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join("/tmp", "expense.db")
+            app.logger.info("✅ Using persistent SQLite database file on Vercel")
+            app.logger.warning("⚠️  NOTE: File system is ephemeral on Vercel - data may be lost during deployments")
+            app.logger.info("💡 RECOMMENDATION: For production, use PostgreSQL or cloud SQLite (Turso/LibSQL)")
+        else:
+            app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+            app.logger.info("✅ Using SQLite database")
     else:
-        # Use in-memory SQLite as fallback
+        # Fallback to in-memory SQLite
         app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
-        print("⚠️  Using in-memory SQLite on Vercel (data will be lost between requests)")
+        app.logger.warning("⚠️  WARNING: Using in-memory SQLite database. Data will be lost between requests!")
 else:
-    # Local development environment
+    # Local development environment - default to SQLite
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(BASE_DIR, "expense.db")
+    app.logger.info("✅ Using local SQLite database for development")
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
@@ -84,10 +149,14 @@ def validate_email(email):
 
 def validate_password(password):
     """Validate password strength"""
-    if len(password) < 6:
-        return False, "Password must be at least 6 characters long"
-    if len(password) > 128:
-        return False, "Password must be less than 128 characters"
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters long"
+    if not re.search(r'[A-Z]', password):
+        return False, "Password must contain at least one uppercase letter"
+    if not re.search(r'[a-z]', password):
+        return False, "Password must contain at least one lowercase letter"
+    if not re.search(r'\d', password):
+        return False, "Password must contain at least one digit"
     return True, "Password is valid"
 
 def validate_amount(amount_str):
@@ -113,20 +182,65 @@ def validate_date(date_str):
         return False, None, "Invalid date format"
 
 def login_required(f):
+    """Decorator to require login"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        if "user_id" not in session:
+            flash("Please log in to access this page.", "danger")
+            return redirect(url_for("login"))
+        
+        # Verify user still exists in database
+        user = User.query.get(session["user_id"])
+        if not user or not user.is_active:
+            session.clear()
+            flash("Your session has expired. Please log in again.", "warning")
+            return redirect(url_for("login"))
+        
+        # Refresh session to prevent timeout during active use
+        session.permanent = True
+        
         return f(*args, **kwargs)
     return decorated_function
 
 def admin_required(f):
+    """Decorator to require admin role"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        if "user_id" not in session:
+            flash("Please log in to access this page.", "danger")
+            return redirect(url_for("login"))
+        
+        user = User.query.get(session["user_id"])
+        if not user or not user.is_active:
+            session.clear()
+            flash("Your session has expired. Please log in again.", "warning")
+            return redirect(url_for("login"))
+        
+        if user.role != 'admin':
+            flash("Access denied. Admin privileges required.", "danger")
+            return redirect(url_for("dashboard"))
+        
         return f(*args, **kwargs)
     return decorated_function
 
 def user_only(f):
+    """Decorator to restrict access to regular users only (not admins)"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        if "user_id" not in session:
+            flash("Please log in to access this page.", "danger")
+            return redirect(url_for("login"))
+        
+        user = User.query.get(session["user_id"])
+        if not user or not user.is_active:
+            session.clear()
+            flash("Your session has expired. Please log in again.", "warning")
+            return redirect(url_for("login"))
+        
+        if user.role == 'admin':
+            flash("Access denied. This page is for regular users only.", "danger")
+            return redirect(url_for("admin_dashboard"))
+        
         return f(*args, **kwargs)
     return decorated_function
 
@@ -134,7 +248,7 @@ def log_admin_action(action, target_user_id=None, details=None):
     """Log admin actions"""
     if "user_id" in session:
         admin_log = AdminLog(
-            admin_id=session.get("user_id", 1),
+            admin_id=session["user_id"],
             action=action,
             target_user_id=target_user_id,
             details=details,
@@ -221,197 +335,15 @@ class AdminLog(db.Model):
     target_user = db.relationship('User', foreign_keys=[target_user_id], backref='admin_targeted_actions')
 
 
-# ----------------- Before Request Handler -----------------
-# Global data storage for Vercel (in-memory)
-VERCEL_DATA = {
-    "users": [],
-    "expenses": [],
-    "categories": [],
-    "budgets": []
-}
-
-def ensure_database_ready():
-    """Ensure database is ready for each request on Vercel"""
-    if os.environ.get('VERCEL'):
-        with app.app_context():
-            try:
-                # Always create tables
-                db.create_all()
-                
-                # Initialize global data if empty
-                if not VERCEL_DATA["users"]:
-                    print("Initializing Vercel data...")
-                    # Add admin user to global data
-                    admin_user_data = {
-                        "id": 1,
-                        "username": "admin",
-                        "email": "admin@expensetracker.com",
-                        "password": generate_password_hash("admin123"),
-                        "role": "admin",
-                        "is_active": True,
-                        "created_at": datetime.now(timezone.utc)
-                    }
-                    VERCEL_DATA["users"].append(admin_user_data)
-                    
-                    # Add default categories
-                    default_categories = [
-                        {"id": 1, "user_id": 1, "name": "Food", "color": "#ef4444", "icon": "🍕"},
-                        {"id": 2, "user_id": 1, "name": "Travel", "color": "#3b82f6", "icon": "🚗"},
-                        {"id": 3, "user_id": 1, "name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
-                        {"id": 4, "user_id": 1, "name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
-                        {"id": 5, "user_id": 1, "name": "Other", "color": "#8b5cf6", "icon": "📁"}
-                    ]
-                    VERCEL_DATA["categories"] = default_categories
-                    
-                    # Sync global data to database only if data was initialized
-                    sync_vercel_data_to_db()
-                    print(f"Vercel data initialized: {len(VERCEL_DATA['users'])} users")
-                else:
-                    # Always sync existing data to database
-                    sync_vercel_data_to_db()
-                
-            except Exception as e:
-                print(f"Database initialization error: {e}")
-                try:
-                    db.session.rollback()
-                except:
-                    pass
-
-def sync_vercel_data_to_db():
-    """Sync Vercel global data to database"""
-    try:
-        # Clear existing data
-        User.query.delete()
-        Category.query.delete()
-        Expense.query.delete()
-        Budget.query.delete()
-        db.session.commit()
-        
-        # Add users from global data
-        for user_data in VERCEL_DATA["users"]:
-            user = User(
-                username=user_data["username"],
-                email=user_data["email"],
-                password=user_data["password"],
-                role=user_data["role"],
-                is_active=user_data["is_active"],
-                created_at=user_data.get("created_at", datetime.now(timezone.utc))
-            )
-            db.session.add(user)
-        
-        # Add categories from global data
-        for cat_data in VERCEL_DATA["categories"]:
-            category = Category(
-                user_id=cat_data["user_id"],
-                name=cat_data["name"],
-                color=cat_data["color"],
-                icon=cat_data["icon"]
-            )
-            db.session.add(category)
-        
-        # Add expenses from global data
-        for exp_data in VERCEL_DATA["expenses"]:
-            expense = Expense(
-                user_id=exp_data["user_id"],
-                title=exp_data["title"],
-                amount=exp_data["amount"],
-                date=exp_data["date"],
-                category=exp_data["category"],
-                description=exp_data.get("description", ""),
-                payment_method=exp_data["payment_method"]
-            )
-            db.session.add(expense)
-        
-        db.session.commit()
-        print(f"✅ Synced {len(VERCEL_DATA['users'])} users to database")
-        
-    except Exception as e:
-        print(f"Sync error: {e}")
-        db.session.rollback()
-
-def sync_db_to_vercel_data():
-    """Sync database to Vercel global data"""
-    try:
-        # Clear global data
-        VERCEL_DATA["users"] = []
-        VERCEL_DATA["categories"] = []
-        VERCEL_DATA["expenses"] = []
-        VERCEL_DATA["budgets"] = []
-        
-        # Add users from database
-        users = User.query.all()
-        for user in users:
-            VERCEL_DATA["users"].append({
-                "id": user.id,
-                "username": user.username,
-                "email": user.email,
-                "password": user.password,
-                "role": user.role,
-                "is_active": user.is_active,
-                "created_at": user.created_at
-            })
-        
-        # Add categories from database
-        categories = Category.query.all()
-        for category in categories:
-            VERCEL_DATA["categories"].append({
-                "id": category.id,
-                "user_id": category.user_id,
-                "name": category.name,
-                "color": category.color,
-                "icon": category.icon
-            })
-        
-        # Add expenses from database
-        expenses = Expense.query.all()
-        for expense in expenses:
-            VERCEL_DATA["expenses"].append({
-                "id": expense.id,
-                "user_id": expense.user_id,
-                "title": expense.title,
-                "amount": expense.amount,
-                "date": expense.date,
-                "category": expense.category,
-                "description": expense.description,
-                "payment_method": expense.payment_method
-            })
-        
-    except Exception as e:
-        print(f"Sync error: {e}")
-
-@app.before_request
-def before_request():
-    """Ensure database is ready on Vercel and clear all errors"""
-    try:
-        # Only ensure database is ready on Vercel, no session validation
-        if os.environ.get('VERCEL'):
-            ensure_database_ready()
-        
-        # AGGRESSIVELY clear all flash messages to prevent session errors from showing
-        if '_flashes' in session:
-            session.pop('_flashes', None)
-        
-        # Clear any session-related flash messages
-        if hasattr(session, '_flashes'):
-            session._flashes = []
-            
-        # Ensure user_id exists in session for all routes
-        if 'user_id' not in session:
-            session['user_id'] = 1
-            session['username'] = 'User'
-            session['role'] = 'user'
-            
-    except Exception as e:
-        print(f"Before request error: {e}")
-        # Continue even if there's an error
-
 # ----------------- Routes -----------------
 @app.route("/")
 def home():
-    # Clear all flash messages
-    if '_flashes' in session:
-        session.pop('_flashes', None)
-    # No session validation - just show the home page
+    if "user_id" in session:
+        user = User.query.get(session["user_id"])
+        if user and user.role == 'admin':
+            return redirect(url_for("admin_dashboard"))
+        else:
+            return redirect(url_for("dashboard"))
     return render_template("index.html", app=app)
 
 @app.route("/register", methods=["GET","POST"])
@@ -451,29 +383,14 @@ def register():
 
             # Create new user
             hashed_password = generate_password_hash(password)
+            new_user = User(
+                username=username,
+                email=email,
+                password=hashed_password
+            )
             
-            if os.environ.get('VERCEL'):
-                # Add to Vercel data storage
-                user_data = {
-                    "id": len(VERCEL_DATA["users"]) + 1,
-                    "username": username,
-                    "email": email,
-                    "password": hashed_password,
-                    "role": "user",
-                    "is_active": True,
-                    "created_at": datetime.now(timezone.utc)
-                }
-                VERCEL_DATA["users"].append(user_data)
-                sync_vercel_data_to_db()
-            else:
-                # Add to database (local)
-                new_user = User(
-                    username=username,
-                    email=email,
-                    password=hashed_password
-                )
-                db.session.add(new_user)
-                db.session.commit()
+            db.session.add(new_user)
+            db.session.commit()
             
             app.logger.info(f"New user registered: {username} ({email})")
             flash("Registration successful! Please log in.", "success")
@@ -516,26 +433,18 @@ def login():
                 flash("Please enter a valid email address.", "danger")
                 return render_template("login.html")
 
-            # Ensure database is ready on Vercel
-            if os.environ.get('VERCEL'):
-                ensure_database_ready()
-            
             user = User.query.filter_by(email=email, is_active=True).first()
             
             if user and check_password_hash(user.password, password):
                 # Update last login
-                try:
-                    user.last_login = datetime.now(timezone.utc)
-                    db.session.commit()
-                except Exception as e:
-                    print(f"Error updating last login: {e}")
-                    # Continue even if last login update fails
+                user.last_login = datetime.now(timezone.utc)
+                db.session.commit()
                 
-                # Set session as permanent
-                session.permanent = True
+                # Set session
                 session["user_id"] = user.id
                 session["username"] = user.username
                 session["role"] = user.role
+                session.permanent = True  # Make session permanent (24 hours)
                 
                 app.logger.info(f"User logged in: {user.username} ({email}) - Role: {user.role}")
                 flash("Login successful!", "success")
@@ -565,116 +474,28 @@ def logout():
     flash("Logged out successfully", "info")
     return redirect(url_for("login"))
 
-@app.route("/clear-session")
-def clear_session():
-    """Clear all session data and flash messages"""
-    session.clear()
-    return redirect(url_for("home"))
-
-@app.route("/clear-flashes")
-def clear_flashes():
-    """Clear all flash messages"""
-    if '_flashes' in session:
-        session.pop('_flashes', None)
-    return redirect(url_for("dashboard"))
-
-@app.route("/force-clear")
-def force_clear():
-    """Force clear everything and redirect to home"""
-    session.clear()
-    return redirect(url_for("home"))
-
 # ----------------- Dashboard -----------------
 @app.route("/dashboard")
 @user_only
 def dashboard():
-    try:
-        user_id = session.get("user_id", 1)  # Default to 1 if not found
-        
-        # AGGRESSIVELY clear all flash messages before processing
-        if '_flashes' in session:
-            session.pop('_flashes', None)
-        if hasattr(session, '_flashes'):
-            session._flashes = []
-        
-        # Ensure database is ready on Vercel
-        if os.environ.get('VERCEL'):
-            ensure_database_ready()
-    except Exception as e:
-        print(f"Dashboard setup error: {e}")
-        user_id = 1
+    user_id = session["user_id"]
 
-    # Initialize default values
-    total_expenses = 0
-    budget_amount = 0
-    remaining = 0
-    overspending_alert = "No Alerts 🎉"
-    expenses_by_category = {}
+    expenses = Expense.query.filter_by(user_id=user_id).all()
+    total_expenses = sum([e.amount for e in expenses])
+    budget = Budget.query.filter_by(user_id=user_id).first()
+    budget_amount = budget.amount if budget else 0
+    remaining = budget_amount - total_expenses
+    overspending_alert = "No Alerts 🎉" if remaining>=0 else "Overspending! ⚠️"
 
-    try:
-        # Get expenses with error handling
-        try:
-            expenses = Expense.query.filter_by(user_id=user_id).all()
-            total_expenses = sum([e.amount for e in expenses]) if expenses else 0
-        except:
-            expenses = []
-            total_expenses = 0
-
-        # Get budget with error handling
-        try:
-            budget = Budget.query.filter_by(user_id=user_id).first()
-            budget_amount = budget.amount if budget else 0
-        except:
-            budget_amount = 0
-
-        remaining = budget_amount - total_expenses
-        overspending_alert = "No Alerts 🎉" if remaining >= 0 else "Overspending! ⚠️"
-
-        # Get user's categories with error handling
-        try:
-            user_categories = Category.query.filter_by(user_id=user_id).all()
-            if not user_categories:
-                # Create default categories if none exist
-                default_categories = [
-                    {"name": "Food", "color": "#ef4444", "icon": "🍕"},
-                    {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
-                    {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
-                    {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
-                    {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
-                ]
-                
-                for cat_data in default_categories:
-                    try:
-                        category = Category(
-                            user_id=user_id,
-                            name=cat_data["name"],
-                            color=cat_data["color"],
-                            icon=cat_data["icon"]
-                        )
-                        db.session.add(category)
-                    except:
-                        pass
-                
-                try:
-                    db.session.commit()
-                    user_categories = Category.query.filter_by(user_id=user_id).all()
-                except:
-                    user_categories = []
-        except:
-            user_categories = []
-
-        # Calculate expenses by category
-        expenses_by_category = {cat.name: 0 for cat in user_categories}
-        for e in expenses:
-            if e.category in expenses_by_category:
-                expenses_by_category[e.category] += e.amount
-
-    except Exception as e:
-        print(f"Dashboard error: {e}")
-        # Use default values if any error occurs
+    # Expenses by category
+    categories = ["Food", "Travel", "Shopping", "Utilities", "Other"]
+    expenses_by_category = {cat: 0 for cat in categories}
+    for e in expenses:
+        if e.category in expenses_by_category:
+            expenses_by_category[e.category] += e.amount
 
     return render_template("dashboard.html",
-                           name=session.get("username", "User"),
+                           name=session["username"],
                            total_expenses=total_expenses,
                            budget_amount=budget_amount,
                            remaining=remaining,
@@ -685,21 +506,7 @@ def dashboard():
 @app.route("/expenses", methods=["GET", "POST"])
 @user_only
 def expenses():
-    try:
-        user_id = session.get("user_id", 1)  # Default to 1 if not found
-        
-        # AGGRESSIVELY clear all flash messages before processing
-        if '_flashes' in session:
-            session.pop('_flashes', None)
-        if hasattr(session, '_flashes'):
-            session._flashes = []
-        
-        # Ensure database is ready on Vercel
-        if os.environ.get('VERCEL'):
-            ensure_database_ready()
-    except Exception as e:
-        print(f"Expenses setup error: {e}")
-        user_id = 1
+    user_id = session["user_id"]
 
     if request.method == "POST":
         try:
@@ -733,28 +540,6 @@ def expenses():
 
             # Validate category - check if it exists in user's categories
             user_categories = [cat.name for cat in Category.query.filter_by(user_id=user_id).all()]
-            if not user_categories:
-                # If no categories exist, create default ones
-                default_categories = [
-                    {"name": "Food", "color": "#ef4444", "icon": "🍕"},
-                    {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
-                    {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
-                    {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
-                    {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
-                ]
-                
-                for cat_data in default_categories:
-                    category_obj = Category(
-                        user_id=user_id,
-                        name=cat_data["name"],
-                        color=cat_data["color"],
-                        icon=cat_data["icon"]
-                    )
-                    db.session.add(category_obj)
-                
-                db.session.commit()
-                user_categories = [cat_data["name"] for cat_data in default_categories]
-            
             if category not in user_categories:
                 flash("Invalid category selected.", "danger")
                 return redirect(url_for("expenses"))
@@ -789,64 +574,52 @@ def expenses():
             flash("An error occurred while adding the expense. Please try again.", "danger")
             return redirect(url_for("expenses"))
 
-    # Get user's categories with error handling
-    try:
-        user_categories = Category.query.filter_by(user_id=user_id).order_by(Category.name).all()
+    # Get user's categories
+    user_categories = Category.query.filter_by(user_id=user_id).order_by(Category.name).all()
+    
+    # If user has no categories, create default ones
+    if not user_categories:
+        default_categories = [
+            {"name": "Food", "color": "#ef4444", "icon": "🍕"},
+            {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
+            {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
+            {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
+            {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
+        ]
         
-        # If user has no categories, create default ones
-        if not user_categories:
-            default_categories = [
-                {"name": "Food", "color": "#ef4444", "icon": "🍕"},
-                {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
-                {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
-                {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
-                {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
-            ]
-            
-            for cat_data in default_categories:
-                try:
-                    category = Category(
-                        user_id=user_id,
-                        name=cat_data["name"],
-                        color=cat_data["color"],
-                        icon=cat_data["icon"]
-                    )
-                    db.session.add(category)
-                except:
-                    pass
-            
-            try:
-                db.session.commit()
-                user_categories = Category.query.filter_by(user_id=user_id).order_by(Category.name).all()
-            except:
-                user_categories = []
-    except:
-        user_categories = []
+        for cat_data in default_categories:
+            category = Category(
+                user_id=user_id,
+                name=cat_data["name"],
+                color=cat_data["color"],
+                icon=cat_data["icon"]
+            )
+            db.session.add(category)
+        
+        db.session.commit()
+        user_categories = Category.query.filter_by(user_id=user_id).order_by(Category.name).all()
 
     filter_category = request.args.get("category", "All")
     search_term = request.args.get("search", "").strip()
     
-    # Build query with error handling
-    try:
-        query = Expense.query.filter_by(user_id=user_id)
-        
-        # Apply category filter
-        if filter_category != "All":
-            query = query.filter(Expense.category == filter_category)
-        
-        # Apply search filter
-        if search_term:
-            query = query.filter(
-                db.or_(
-                    Expense.title.ilike(f"%{search_term}%"),
-                    Expense.description.ilike(f"%{search_term}%"),
-                    Expense.category.ilike(f"%{search_term}%")
-                )
+    # Build query
+    query = Expense.query.filter_by(user_id=user_id)
+    
+    # Apply category filter
+    if filter_category != "All":
+        query = query.filter(Expense.category == filter_category)
+    
+    # Apply search filter
+    if search_term:
+        query = query.filter(
+            db.or_(
+                Expense.title.ilike(f"%{search_term}%"),
+                Expense.description.ilike(f"%{search_term}%"),
+                Expense.category.ilike(f"%{search_term}%")
             )
-        
-        user_expenses = query.order_by(Expense.date.desc()).all()
-    except:
-        user_expenses = []
+        )
+    
+    user_expenses = query.order_by(Expense.date.desc()).all()
 
     # Calculate expenses by category
     expenses_by_category = {}
@@ -869,14 +642,14 @@ def expenses():
 @app.route("/expenses/view/<int:id>")
 @user_only
 def view_expense(id):
-    expense = Expense.query.filter_by(id=id, user_id=session.get("user_id", 1)).first_or_404()
+    expense = Expense.query.filter_by(id=id, user_id=session["user_id"]).first_or_404()
     return render_template("view_expense.html", expense=expense)
 
 @app.route("/expenses/edit/<int:id>", methods=["GET","POST"])
 @user_only
 def edit_expense(id):
-    expense = Expense.query.filter_by(id=id, user_id=session.get("user_id", 1)).first_or_404()
-    user_id = session.get("user_id", 1)
+    expense = Expense.query.filter_by(id=id, user_id=session["user_id"]).first_or_404()
+    user_id = session["user_id"]
 
     if request.method == "POST":
         try:
@@ -911,9 +684,9 @@ def edit_expense(id):
                 flash(error_msg, "danger")
                 return render_template("edit_expense.html", expense=expense, user_categories=user_categories)
 
-            # Validate category - check if it exists in user's categories
-            user_categories_names = [cat.name for cat in user_categories]
-            if category not in user_categories_names:
+            # Validate category
+            valid_categories = ["Food", "Travel", "Shopping", "Utilities", "Other"]
+            if category not in valid_categories:
                 flash("Invalid category selected.", "danger")
                 return render_template("edit_expense.html", expense=expense, user_categories=user_categories)
 
@@ -954,7 +727,7 @@ def edit_expense(id):
 @user_only
 def delete_expense(id):
     try:
-        expense = Expense.query.filter_by(id=id, user_id=session.get("user_id", 1)).first_or_404()
+        expense = Expense.query.filter_by(id=id, user_id=session["user_id"]).first_or_404()
         title = expense.title
         amount = expense.amount
         
@@ -975,7 +748,7 @@ def delete_expense(id):
 @app.route("/categories", methods=["GET", "POST"])
 @user_only
 def categories():
-    user_id = session.get("user_id", 1)
+    user_id = session["user_id"]
     
     if request.method == "POST":
         try:
@@ -1051,7 +824,7 @@ def delete_category(id):
 @app.route("/budget", methods=["GET","POST"])
 @user_only
 def budget():
-    user_id = session.get("user_id", 1)
+    user_id = session["user_id"]
     budget = Budget.query.filter_by(user_id=user_id).first()
     
     # Calculate current month expenses
@@ -1115,76 +888,18 @@ def budget():
 @app.route("/reports")
 @user_only
 def reports():
-    try:
-        user_id = session.get("user_id", 1)  # Default to 1 if not found
-        
-        # AGGRESSIVELY clear all flash messages before processing
-        if '_flashes' in session:
-            session.pop('_flashes', None)
-        if hasattr(session, '_flashes'):
-            session._flashes = []
-        
-        # Ensure database is ready on Vercel
-        if os.environ.get('VERCEL'):
-            ensure_database_ready()
-    except Exception as e:
-        print(f"Reports setup error: {e}")
-        user_id = 1
+    user_id = session["user_id"]
     
     try:
-        # Get expenses with error handling
-        try:
-            expenses = Expense.query.filter_by(user_id=user_id).all()
-            total_expenses = sum([e.amount for e in expenses]) if expenses else 0
-        except Exception as e:
-            print(f"Error fetching expenses: {e}")
-            expenses = []
-            total_expenses = 0
-        
-        # Get budget with error handling
-        try:
-            budget = Budget.query.filter_by(user_id=user_id).first()
-            budget_amount = budget.amount if budget else 0
-        except Exception as e:
-            print(f"Error fetching budget: {e}")
-            budget_amount = 0
-        
+        expenses = Expense.query.filter_by(user_id=user_id).all()
+        total_expenses = sum([e.amount for e in expenses])
+        budget = Budget.query.filter_by(user_id=user_id).first()
+        budget_amount = budget.amount if budget else 0
         remaining = budget_amount - total_expenses
         
-        # Get user's categories for expenses by category
-        try:
-            user_categories = Category.query.filter_by(user_id=user_id).all()
-            if not user_categories:
-                # Create default categories if none exist
-                default_categories = [
-                    {"name": "Food", "color": "#ef4444", "icon": "🍕"},
-                    {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
-                    {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
-                    {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
-                    {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
-                ]
-                
-                for cat_data in default_categories:
-                    category = Category(
-                        user_id=user_id,
-                        name=cat_data["name"],
-                        color=cat_data["color"],
-                        icon=cat_data["icon"]
-                    )
-                    db.session.add(category)
-                
-                try:
-                    db.session.commit()
-                    user_categories = Category.query.filter_by(user_id=user_id).all()
-                except Exception as e:
-                    print(f"Error creating categories: {e}")
-                    user_categories = []
-        except Exception as e:
-            print(f"Error fetching categories: {e}")
-            user_categories = []
-        
         # Calculate expenses by category
-        expenses_by_category = {cat.name: 0 for cat in user_categories}
+        categories = ["Food", "Travel", "Shopping", "Utilities", "Other"]
+        expenses_by_category = {cat: 0 for cat in categories}
         for e in expenses:
             if e.category in expenses_by_category:
                 expenses_by_category[e.category] += e.amount
@@ -1196,21 +911,16 @@ def reports():
                              expenses_by_category=expenses_by_category)
                              
     except Exception as e:
-        print(f"Error generating reports: {str(e)}")
         app.logger.error(f"Error generating reports: {str(e)}")
-        # Return empty data instead of redirecting with error - NO FLASH MESSAGE
-        return render_template("reports.html", 
-                             total_expenses=0,
-                             budget_amount=0, 
-                             remaining=0,
-                             expenses_by_category={})
+        flash("An error occurred while generating reports. Please try again.", "danger")
+        return redirect(url_for("dashboard"))
 
 # ----------------- Export CSV -----------------
 @app.route("/export/csv")
 @user_only
 def export_csv():
     try:
-        user_id = session.get("user_id", 1)
+        user_id = session["user_id"]
         expenses = Expense.query.filter_by(user_id=user_id).order_by(Expense.date.desc()).all()
 
         def generate():
@@ -1232,7 +942,7 @@ def export_csv():
 @user_only
 def export_pdf():
     try:
-        user_id = session.get("user_id", 1)
+        user_id = session["user_id"]
         expenses = Expense.query.filter_by(user_id=user_id).order_by(Expense.date.desc()).all()
         
         # Calculate summary data
@@ -1241,32 +951,9 @@ def export_pdf():
         budget_amount = budget.amount if budget else 0
         remaining = budget_amount - total_expenses
         
-        # Get user's categories for expenses by category
-        user_categories = Category.query.filter_by(user_id=user_id).all()
-        if not user_categories:
-            # Create default categories if none exist
-            default_categories = [
-                {"name": "Food", "color": "#ef4444", "icon": "🍕"},
-                {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
-                {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
-                {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
-                {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
-            ]
-            
-            for cat_data in default_categories:
-                category = Category(
-                    user_id=user_id,
-                    name=cat_data["name"],
-                    color=cat_data["color"],
-                    icon=cat_data["icon"]
-                )
-                db.session.add(category)
-            
-            db.session.commit()
-            user_categories = Category.query.filter_by(user_id=user_id).all()
-        
         # Calculate expenses by category
-        expenses_by_category = {cat.name: 0 for cat in user_categories}
+        categories = ["Food", "Travel", "Shopping", "Utilities", "Other"]
+        expenses_by_category = {cat: 0 for cat in categories}
         for e in expenses:
             if e.category in expenses_by_category:
                 expenses_by_category[e.category] += e.amount
@@ -1433,14 +1120,14 @@ def export_pdf():
 @app.route("/profile")
 @login_required
 def profile():
-    user = User.query.get(session.get("user_id", 1))
+    user = User.query.get(session["user_id"])
     return render_template("profile.html", user=user)
 
 @app.route("/profile/update", methods=["POST"])
 @login_required
 def update_profile():
     try:
-        user = User.query.get(session.get("user_id", 1))
+        user = User.query.get(session["user_id"])
         new_username = request.form.get("username", "").strip()
         new_email = request.form.get("email", "").strip()
         
@@ -1480,7 +1167,7 @@ def update_profile():
 @login_required
 def change_password():
     try:
-        user = User.query.get(session.get("user_id", 1))
+        user = User.query.get(session["user_id"])
         current_password = request.form.get("current_password", "").strip()
         new_password = request.form.get("new_password", "").strip()
         confirm_password = request.form.get("confirm_password", "").strip()
@@ -1524,7 +1211,7 @@ def change_password():
 @login_required
 def delete_account():
     try:
-        user = User.query.get(session.get("user_id", 1))
+        user = User.query.get(session["user_id"])
         confirm_text = request.form.get("confirm_text", "").strip()
         password = request.form.get("password", "").strip()
         
@@ -1592,13 +1279,7 @@ def delete_account():
 @admin_required
 def admin_dashboard():
     """Admin dashboard with system statistics"""
-    user_id = session.get("user_id", 1)  # Default to 1 if not foundimage.png
-    
     try:
-        # Ensure database is ready and synced on Vercel
-        if os.environ.get('VERCEL'):
-            ensure_database_ready()
-        
         # Get system statistics
         total_users = User.query.count()
         active_users = User.query.filter_by(is_active=True).count()
@@ -1651,10 +1332,6 @@ def admin_dashboard():
 def admin_users():
     """Manage all users"""
     try:
-        # Ensure database is ready and synced on Vercel
-        if os.environ.get('VERCEL'):
-            ensure_database_ready()
-        
         page = request.args.get('page', 1, type=int)
         search = request.args.get('search', '', type=str)
         role_filter = request.args.get('role', 'all', type=str)
@@ -1735,76 +1412,38 @@ def admin_user_detail(user_id):
 def admin_delete_user(user_id):
     """Delete a user and all their data"""
     try:
-        # Ensure database is ready on Vercel
-        if os.environ.get('VERCEL'):
-            ensure_database_ready()
-        
         user = User.query.get_or_404(user_id)
         username = user.username
         email = user.email
         
-        # Delete user's data with error handling
-        try:
-            Expense.query.filter_by(user_id=user_id).delete()
-        except:
-            pass
+        # Get counts for logging
+        expense_count = Expense.query.filter_by(user_id=user_id).count()
+        category_count = Category.query.filter_by(user_id=user_id).count()
+        budget_count = Budget.query.filter_by(user_id=user_id).count()
         
-        try:
-            Category.query.filter_by(user_id=user_id).delete()
-        except:
-            pass
-        
-        try:
-            Budget.query.filter_by(user_id=user_id).delete()
-        except:
-            pass
-        
-        try:
-            AdminLog.query.filter_by(admin_id=user_id).delete()
-        except:
-            pass
-        
-        try:
-            AdminLog.query.filter_by(target_user_id=user_id).delete()
-        except:
-            pass
+        # Delete user's data
+        Expense.query.filter_by(user_id=user_id).delete()
+        Category.query.filter_by(user_id=user_id).delete()
+        Budget.query.filter_by(user_id=user_id).delete()
+        AdminLog.query.filter_by(admin_id=user_id).delete()
+        AdminLog.query.filter_by(target_user_id=user_id).delete()
         
         # Delete user
-        try:
-            db.session.delete(user)
-            db.session.commit()
-            
-            # Also remove from Vercel data if on Vercel
-            if os.environ.get('VERCEL'):
-                VERCEL_DATA["users"] = [u for u in VERCEL_DATA["users"] if u.get("id") != user_id]
-                VERCEL_DATA["expenses"] = [e for e in VERCEL_DATA["expenses"] if e.get("user_id") != user_id]
-                VERCEL_DATA["categories"] = [c for c in VERCEL_DATA["categories"] if c.get("user_id") != user_id]
-                VERCEL_DATA["budgets"] = [b for b in VERCEL_DATA["budgets"] if b.get("user_id") != user_id]
-            
-            flash(f"User {username} and all their data have been permanently deleted.", "success")
-        except Exception as e:
-            print(f"Error deleting user: {e}")
-            flash("User deleted from database but some data may remain.", "warning")
+        db.session.delete(user)
+        db.session.commit()
         
+        log_admin_action(f"User deleted", None, f"Deleted user {username} ({email}) with {expense_count} expenses, {category_count} categories, {budget_count} budgets")
+        
+        flash(f"User {username} and all their data have been permanently deleted.", "success")
         return redirect(url_for("admin_users"))
         
     except Exception as e:
-        print(f"Error in admin_delete_user: {e}")
-        flash("An error occurred while deleting the user. Please try again.", "danger")
+        db.session.rollback()
+        app.logger.error(f"Error deleting user: {str(e)}")
+        flash("An error occurred while deleting the user.", "danger")
         return redirect(url_for("admin_users"))
 
 
-
-# ----------------- Global Error Handler -----------------
-@app.errorhandler(Exception)
-def handle_exception(e):
-    """Global error handler to catch all errors"""
-    print(f"Global error: {e}")
-    # Clear any flash messages
-    if '_flashes' in session:
-        session.pop('_flashes', None)
-    # Return a safe response
-    return render_template("index.html", app=app)
 
 # ----------------- Error Handlers -----------------
 @app.errorhandler(400)
@@ -1859,8 +1498,94 @@ def create_admin_user():
         app.logger.error(f"Error creating admin user: {str(e)}")
         print(f"❌ Error creating admin user: {str(e)}")
 
+def safe_add_column(table_name, column_name, column_type, default_value=None):
+    """Safely add a column to an existing table without losing data"""
+    try:
+        inspector = db.inspect(db.engine)
+        existing_columns = [col['name'] for col in inspector.get_columns(table_name)]
+        
+        if column_name not in existing_columns:
+            app.logger.info(f"Adding column {column_name} to table {table_name}")
+            
+            # Use raw SQL to add column safely
+            if default_value is not None:
+                if isinstance(default_value, str):
+                    db.session.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type} DEFAULT '{default_value}'")
+                else:
+                    db.session.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type} DEFAULT {default_value}")
+            else:
+                db.session.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+            
+            db.session.commit()
+            app.logger.info(f"Successfully added column {column_name} to {table_name}")
+            return True
+        else:
+            app.logger.info(f"Column {column_name} already exists in {table_name}")
+            return False
+    except Exception as e:
+        app.logger.error(f"Error adding column {column_name} to {table_name}: {str(e)}")
+        db.session.rollback()
+        return False
+
+def backup_user_data():
+    """Create a backup of user data before any destructive operations"""
+    try:
+        users = User.query.all()
+        backup_data = []
+        for user in users:
+            user_data = {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'password': user.password,
+                'created_at': getattr(user, 'created_at', None),
+                'last_login': getattr(user, 'last_login', None),
+                'is_active': getattr(user, 'is_active', True),
+                'role': getattr(user, 'role', 'user')
+            }
+            backup_data.append(user_data)
+        
+        app.logger.info(f"Backed up {len(backup_data)} users")
+        return backup_data
+    except Exception as e:
+        app.logger.error(f"Error creating user backup: {str(e)}")
+        return []
+
+def restore_user_data(backup_data):
+    """Restore user data from backup"""
+    try:
+        for user_data in backup_data:
+            # Check if user already exists
+            existing_user = User.query.get(user_data['id'])
+            if not existing_user:
+                user = User(
+                    id=user_data['id'],
+                    username=user_data['username'],
+                    email=user_data['email'],
+                    password=user_data['password']
+                )
+                # Add new columns if they exist in backup
+                if 'created_at' in user_data and user_data['created_at']:
+                    user.created_at = user_data['created_at']
+                if 'last_login' in user_data and user_data['last_login']:
+                    user.last_login = user_data['last_login']
+                if 'is_active' in user_data:
+                    user.is_active = user_data['is_active']
+                if 'role' in user_data:
+                    user.role = user_data['role']
+                
+                db.session.add(user)
+        
+        db.session.commit()
+        app.logger.info(f"Restored {len(backup_data)} users from backup")
+        return True
+    except Exception as e:
+        app.logger.error(f"Error restoring user data: {str(e)}")
+        db.session.rollback()
+        return False
+
 def init_database():
-    """Initialize database with proper migration"""
+    """Initialize database with safe migration that preserves data"""
     with app.app_context():
         try:
             # Check if tables exist
@@ -1871,12 +1596,49 @@ def init_database():
                 # Check if new columns exist
                 user_columns = [col['name'] for col in inspector.get_columns('user')]
                 
-                # If new columns don't exist, drop and recreate tables
-                if 'created_at' not in user_columns or 'last_login' not in user_columns or 'is_active' not in user_columns or 'role' not in user_columns:
-                    app.logger.info("Database schema outdated, recreating tables...")
-                    db.drop_all()
-                    db.create_all()
-                    app.logger.info("Database recreated with new schema")
+                # Check if we need to add any missing columns
+                missing_columns = []
+                if 'created_at' not in user_columns:
+                    missing_columns.append(('created_at', 'DATETIME', 'CURRENT_TIMESTAMP'))
+                if 'last_login' not in user_columns:
+                    missing_columns.append(('last_login', 'DATETIME', None))
+                if 'is_active' not in user_columns:
+                    missing_columns.append(('is_active', 'BOOLEAN', True))
+                if 'role' not in user_columns:
+                    missing_columns.append(('role', 'VARCHAR(20)', "'user'"))
+                
+                if missing_columns:
+                    app.logger.info(f"Database schema needs updates. Adding {len(missing_columns)} missing columns...")
+                    
+                    # Create backup before making changes
+                    backup_data = backup_user_data()
+                    
+                    # Add missing columns safely
+                    for column_name, column_type, default_value in missing_columns:
+                        safe_add_column('user', column_name, column_type, default_value)
+                    
+                    # Update existing users with default values for new columns
+                    if missing_columns:
+                        users = User.query.all()
+                        for user in users:
+                            updated = False
+                            if 'created_at' not in user_columns and not hasattr(user, 'created_at'):
+                                user.created_at = datetime.now(timezone.utc)
+                                updated = True
+                            if 'is_active' not in user_columns and not hasattr(user, 'is_active'):
+                                user.is_active = True
+                                updated = True
+                            if 'role' not in user_columns and not hasattr(user, 'role'):
+                                user.role = 'user'
+                                updated = True
+                            
+                            if updated:
+                                db.session.add(user)
+                        
+                        db.session.commit()
+                        app.logger.info("Updated existing users with default values for new columns")
+                    
+                    app.logger.info("Database schema updated successfully while preserving all data")
                 else:
                     app.logger.info("Database schema is up to date")
             else:
@@ -1890,512 +1652,33 @@ def init_database():
         except Exception as e:
             app.logger.error(f"Database initialization failed: {str(e)}")
             print(f"Database initialization failed: {str(e)}")
-            # Try to recreate database
+            
+            # Only as a last resort, try to recreate database
+            # But first warn the user about data loss
+            print("⚠️  WARNING: Database initialization failed. Attempting to recreate database...")
+            print("⚠️  This will result in DATA LOSS if there was existing data!")
+            
             try:
+                # Check if there are any users before dropping
+                try:
+                    user_count = User.query.count()
+                    if user_count > 0:
+                        print(f"⚠️  WARNING: Found {user_count} existing users. Data will be lost!")
+                        response = input("Do you want to continue? This will DELETE ALL DATA! (yes/no): ")
+                        if response.lower() != 'yes':
+                            print("Database recreation cancelled.")
+                            return
+                except:
+                    pass  # If we can't check, proceed with recreation
+                
                 db.drop_all()
                 db.create_all()
                 app.logger.info("Database recreated after error")
                 create_admin_user()
+                print("✅ Database recreated successfully")
             except Exception as e2:
                 app.logger.error(f"Database recreation failed: {str(e2)}")
-                print(f"Database recreation failed: {str(e2)}")
-
-def init_database_on_vercel():
-    """Initialize database specifically for Vercel deployment"""
-    with app.app_context():
-        try:
-            # Always create tables on Vercel to ensure they exist
-            db.create_all()
-            app.logger.info("SQLite tables created/verified on Vercel")
-            
-            # Create admin user
-            create_admin_user()
-            app.logger.info("Admin user ensured on Vercel")
-            
-            # Create default categories for admin
-            admin_user = User.query.filter_by(email="admin@expensetracker.com").first()
-            if admin_user:
-                default_categories = [
-                    {"name": "Food", "color": "#ef4444", "icon": "🍕"},
-                    {"name": "Travel", "color": "#3b82f6", "icon": "🚗"},
-                    {"name": "Shopping", "color": "#22c55e", "icon": "🛍️"},
-                    {"name": "Utilities", "color": "#f59e0b", "icon": "⚡"},
-                    {"name": "Other", "color": "#8b5cf6", "icon": "📁"}
-                ]
-                
-                for cat_data in default_categories:
-                    existing_cat = Category.query.filter_by(
-                        user_id=admin_user.id, 
-                        name=cat_data["name"]
-                    ).first()
-                    
-                    if not existing_cat:
-                        category = Category(
-                            user_id=admin_user.id,
-                            name=cat_data["name"],
-                            color=cat_data["color"],
-                            icon=cat_data["icon"]
-                        )
-                        db.session.add(category)
-                
-                db.session.commit()
-                app.logger.info("Default categories created for admin")
-            
-        except Exception as e:
-            app.logger.error(f"Vercel SQLite initialization failed: {str(e)}")
-            print(f"Vercel SQLite initialization failed: {str(e)}")
-
-@app.route("/setup-admin")
-def setup_admin():
-    """Setup admin user for Vercel deployment"""
-    try:
-        admin_email = "admin@expensetracker.com"
-        admin_user = User.query.filter_by(email=admin_email).first()
-        
-        if admin_user:
-            # Update existing admin
-            admin_user.password = generate_password_hash("admin123")
-            admin_user.is_active = True
-            admin_user.role = "admin"
-            db.session.commit()
-            return f"Admin user updated: {admin_email} / admin123"
-        else:
-            # Create new admin
-            admin_user = User(
-                username="admin",
-                email=admin_email,
-                password=generate_password_hash("admin123"),
-                role="admin",
-                is_active=True
-            )
-            db.session.add(admin_user)
-            db.session.commit()
-            return f"Admin user created: {admin_email} / admin123"
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-@app.route("/init-db")
-def init_database_endpoint():
-    """Initialize database for Vercel deployment"""
-    try:
-        # Use the Vercel-specific initialization
-        init_database_on_vercel()
-        return f"SQLite database initialized successfully! Admin: admin@expensetracker.com / admin123"
-    except Exception as e:
-        return f"Database initialization error: {str(e)}"
-
-@app.route("/reset-db")
-def reset_database():
-    """Reset database for Vercel deployment (useful for testing)"""
-    try:
-        with app.app_context():
-            # Drop and recreate all tables
-            db.drop_all()
-            db.create_all()
-            
-            # Initialize with admin user and categories
-            init_database_on_vercel()
-            
-        return f"SQLite database reset successfully! Admin: admin@expensetracker.com / admin123"
-    except Exception as e:
-        return f"Database reset error: {str(e)}"
-
-@app.route("/export-data")
-def export_data():
-    """Export all data from Vercel database"""
-    try:
-        with app.app_context():
-            data = {
-                "users": [],
-                "expenses": [],
-                "categories": [],
-                "budgets": []
-            }
-            
-            # Export users
-            users = User.query.all()
-            for user in users:
-                data["users"].append({
-                    "id": user.id,
-                    "username": user.username,
-                    "email": user.email,
-                    "role": user.role,
-                    "is_active": user.is_active,
-                    "created_at": user.created_at.isoformat() if user.created_at else None
-                })
-            
-            # Export expenses
-            expenses = Expense.query.all()
-            for expense in expenses:
-                data["expenses"].append({
-                    "id": expense.id,
-                    "user_id": expense.user_id,
-                    "title": expense.title,
-                    "amount": expense.amount,
-                    "date": expense.date.isoformat() if expense.date else None,
-                    "category": expense.category,
-                    "description": expense.description,
-                    "payment_method": expense.payment_method
-                })
-            
-            # Export categories
-            categories = Category.query.all()
-            for category in categories:
-                data["categories"].append({
-                    "id": category.id,
-                    "user_id": category.user_id,
-                    "name": category.name,
-                    "color": category.color,
-                    "icon": category.icon
-                })
-            
-            return json.dumps(data, indent=2)
-            
-    except Exception as e:
-        return f"Export error: {str(e)}"
-
-@app.route("/check-data")
-def check_data():
-    """Check current data in Vercel database"""
-    try:
-        with app.app_context():
-            user_count = User.query.count()
-            expense_count = Expense.query.count()
-            category_count = Category.query.count()
-            budget_count = Budget.query.count()
-            
-            users = User.query.all()
-            user_list = []
-            for user in users:
-                user_list.append({
-                    "id": user.id,
-                    "username": user.username,
-                    "email": user.email,
-                    "role": user.role,
-                    "is_active": user.is_active
-                })
-            
-            return f"""
-            <h2>Vercel Database Status</h2>
-            <p><strong>Users:</strong> {user_count}</p>
-            <p><strong>Expenses:</strong> {expense_count}</p>
-            <p><strong>Categories:</strong> {category_count}</p>
-            <p><strong>Budgets:</strong> {budget_count}</p>
-            
-            <h3>Users:</h3>
-            <pre>{json.dumps(user_list, indent=2)}</pre>
-            
-            <p><a href="/export-data">Export All Data</a></p>
-            <p><a href="/init-db">Initialize Database</a></p>
-            <p><a href="/reset-db">Reset Database</a></p>
-            """
-            
-    except Exception as e:
-        return f"Check data error: {str(e)}"
-
-@app.route("/vercel-data")
-def vercel_data():
-    """View Vercel persistent data storage"""
-    try:
-        return f"""
-        <h2>Vercel Persistent Data Storage</h2>
-        <p><strong>Users ({len(VERCEL_DATA['users'])}):</strong></p>
-        <pre>{json.dumps(VERCEL_DATA['users'], indent=2, default=str)}</pre>
-        
-        <p><strong>Expenses ({len(VERCEL_DATA['expenses'])}):</strong></p>
-        <pre>{json.dumps(VERCEL_DATA['expenses'], indent=2, default=str)}</pre>
-        
-        <p><strong>Categories ({len(VERCEL_DATA['categories'])}):</strong></p>
-        <pre>{json.dumps(VERCEL_DATA['categories'], indent=2, default=str)}</pre>
-        
-        <p><a href="/sync-to-db">Sync to Database</a></p>
-        <p><a href="/sync-from-db">Sync from Database</a></p>
-        <p><a href="/check-data">Check Database</a></p>
-        """
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-@app.route("/sync-to-db")
-def sync_to_database():
-    """Sync Vercel data to database"""
-    try:
-        sync_vercel_data_to_db()
-        return "Data synced to database successfully!"
-    except Exception as e:
-        return f"Sync error: {str(e)}"
-
-@app.route("/sync-from-db")
-def sync_from_database():
-    """Sync database to Vercel data"""
-    try:
-        sync_db_to_vercel_data()
-        return "Data synced from database successfully!"
-    except Exception as e:
-        return f"Sync error: {str(e)}"
-
-@app.route("/export-vercel-users")
-def export_vercel_users():
-    """Export users from Vercel to local database"""
-    try:
-        if os.environ.get('VERCEL'):
-            # On Vercel, show the persistent data
-            users_data = VERCEL_DATA["users"]
-            return f"""
-            <h2>Vercel Users Data</h2>
-            <p><strong>Total Users:</strong> {len(users_data)}</p>
-            <pre>{json.dumps(users_data, indent=2, default=str)}</pre>
-            
-            <h3>Instructions to sync to local database:</h3>
-            <ol>
-                <li>Copy the JSON data above</li>
-                <li>Run this Python script on your local machine:</li>
-            </ol>
-            
-            <pre>
-import sqlite3
-from werkzeug.security import generate_password_hash
-from datetime import datetime, timezone
-
-# Connect to local database
-conn = sqlite3.connect('expense.db')
-cursor = conn.cursor()
-
-# Clear existing users (except admin)
-cursor.execute("DELETE FROM user WHERE role != 'admin'")
-
-# Add users from Vercel data
-for user_data in users_data:
-    if user_data['role'] != 'admin':  # Skip admin as it already exists
-        cursor.execute("INSERT INTO user (username, email, password, role, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?)", (
-            user_data['username'],
-            user_data['email'],
-            user_data['password'],
-            user_data['role'],
-            user_data['is_active'],
-            user_data['created_at']
-        ))
-
-conn.commit()
-conn.close()
-print("Users synced to local database!")
-            </pre>
-            """
-        else:
-            # On local, show current users
-            with app.app_context():
-                users = User.query.all()
-                users_data = []
-                for user in users:
-                    users_data.append({
-                        "id": user.id,
-                        "username": user.username,
-                        "email": user.email,
-                        "role": user.role,
-                        "is_active": user.is_active,
-                        "created_at": user.created_at.isoformat() if user.created_at else None
-                    })
-                
-                return f"""
-                <h2>Local Database Users</h2>
-                <p><strong>Total Users:</strong> {len(users_data)}</p>
-                <pre>{json.dumps(users_data, indent=2)}</pre>
-                """
-    except Exception as e:
-        return f"Export error: {str(e)}"
-
-@app.route("/force-sync")
-def force_sync():
-    """Force sync all data on Vercel"""
-    try:
-        if os.environ.get('VERCEL'):
-            # Force sync from persistent data to database
-            sync_vercel_data_to_db()
-            
-            # Get current counts
-            with app.app_context():
-                user_count = User.query.count()
-                expense_count = Expense.query.count()
-                category_count = Category.query.count()
-            
-            return f"""
-            <h2>Force Sync Completed</h2>
-            <p><strong>Users in database:</strong> {user_count}</p>
-            <p><strong>Expenses in database:</strong> {expense_count}</p>
-            <p><strong>Categories in database:</strong> {category_count}</p>
-            <p><strong>Users in persistent storage:</strong> {len(VERCEL_DATA['users'])}</p>
-            
-            <p><a href="/admin">Go to Admin Panel</a></p>
-            <p><a href="/check-data">Check Database</a></p>
-            """
-        else:
-            return "This endpoint only works on Vercel"
-    except Exception as e:
-        return f"Force sync error: {str(e)}"
-
-@app.route("/session-status")
-def session_status():
-    """Check current session status"""
-    try:
-        session_info = {
-            "user_id": session.get("user_id"),
-            "username": session.get("username"),
-            "role": session.get("role"),
-            "permanent": session.permanent,
-            "is_vercel": bool(os.environ.get('VERCEL')),
-            "current_endpoint": request.endpoint,
-            "session_keys": list(session.keys())
-        }
-        
-        if session.get("user_id"):
-            try:
-                user = User.query.get(session.get("user_id", 1))
-                if user:
-                    session_info["user_exists"] = True
-                    session_info["user_active"] = user.is_active
-                    session_info["user_created"] = user.created_at.isoformat() if user.created_at else None
-                else:
-                    session_info["user_exists"] = False
-            except Exception as e:
-                session_info["user_query_error"] = str(e)
-        
-        return f"""
-        <h2>Session Status</h2>
-        <pre>{json.dumps(session_info, indent=2)}</pre>
-        
-        <p><a href="/dashboard">Go to Dashboard</a></p>
-        <p><a href="/reports">Go to Reports</a></p>
-        <p><a href="/logout">Logout</a></p>
-        <p><a href="/test-session">Test Session</a></p>
-        """
-    except Exception as e:
-        return f"Session status error: {str(e)}"
-
-@app.route("/test-session")
-def test_session():
-    """Test session functionality"""
-    try:
-        if "user_id" not in session:
-            return "No session found. Please <a href='/login'>login</a> first."
-        
-        # Test database access
-        try:
-            user = User.query.get(session.get("user_id", 1))
-            if user:
-                return f"""
-                <h2>Session Test Successful!</h2>
-                <p><strong>User:</strong> {user.username}</p>
-                <p><strong>Email:</strong> {user.email}</p>
-                <p><strong>Role:</strong> {user.role}</p>
-                <p><strong>Active:</strong> {user.is_active}</p>
-                
-                <p><a href="/dashboard">Go to Dashboard</a></p>
-                <p><a href="/reports">Go to Reports</a></p>
-                <p><a href="/session-status">Check Session Status</a></p>
-                """
-            else:
-                return "User not found in database. Session may be invalid."
-        except Exception as e:
-            return f"Database error: {str(e)}"
-    except Exception as e:
-        return f"Test error: {str(e)}"
-
-@app.route("/test-admin")
-def test_admin():
-    """Test admin user on Vercel"""
-    try:
-        if os.environ.get('VERCEL'):
-            ensure_database_ready()
-            
-            # Check if admin user exists
-            admin_user = User.query.filter_by(email="admin@expensetracker.com").first()
-            if admin_user:
-                return f"""
-                <h2>Admin User Found!</h2>
-                <p><strong>Username:</strong> {admin_user.username}</p>
-                <p><strong>Email:</strong> {admin_user.email}</p>
-                <p><strong>Role:</strong> {admin_user.role}</p>
-                <p><strong>Active:</strong> {admin_user.is_active}</p>
-                <p><strong>Created:</strong> {admin_user.created_at}</p>
-                
-                <p><a href="/login">Go to Login</a></p>
-                <p><a href="/check-data">Check Database</a></p>
-                """
-            else:
-                return """
-                <h2>Admin User Not Found!</h2>
-                <p>Admin user not found in database.</p>
-                <p><a href="/init-db">Initialize Database</a></p>
-                <p><a href="/check-data">Check Database</a></p>
-                """
-        else:
-            return "This endpoint only works on Vercel"
-    except Exception as e:
-        return f"Test error: {str(e)}"
-
-@app.route("/test-reports")
-def test_reports():
-    """Test reports page functionality"""
-    try:
-        if "user_id" not in session:
-            return "No session found. Please <a href='/login'>login</a> first."
-        
-        # Ensure database is ready on Vercel
-        if os.environ.get('VERCEL'):
-            ensure_database_ready()
-        
-        user_id = session.get("user_id", 1)
-        
-        # Test database queries
-        try:
-            expenses = Expense.query.filter_by(user_id=user_id).all()
-            total_expenses = sum([e.amount for e in expenses]) if expenses else 0
-            budget = Budget.query.filter_by(user_id=user_id).first()
-            budget_amount = budget.amount if budget else 0
-            categories = Category.query.filter_by(user_id=user_id).all()
-            
-            return f"""
-            <h2>Reports Test Successful!</h2>
-            <p><strong>User ID:</strong> {user_id}</p>
-            <p><strong>Total Expenses:</strong> {total_expenses}</p>
-            <p><strong>Budget Amount:</strong> {budget_amount}</p>
-            <p><strong>Categories:</strong> {len(categories)}</p>
-            <p><strong>Remaining Budget:</strong> {budget_amount - total_expenses}</p>
-            
-            <p><a href="/reports">Go to Reports</a></p>
-            <p><a href="/dashboard">Go to Dashboard</a></p>
-            """
-        except Exception as e:
-            return f"Database error: {str(e)}"
-    except Exception as e:
-        return f"Test error: {str(e)}"
-
-@app.route("/test-session-simple")
-def test_session_simple():
-    """Simple session test without database validation"""
-    try:
-        session_info = {
-            "user_id": session.get("user_id"),
-            "username": session.get("username"),
-            "role": session.get("role"),
-            "permanent": session.permanent,
-            "is_vercel": bool(os.environ.get('VERCEL')),
-            "session_keys": list(session.keys())
-        }
-        
-        return f"""
-        <h2>Simple Session Test</h2>
-        <pre>{json.dumps(session_info, indent=2)}</pre>
-        
-        <p><a href="/dashboard">Go to Dashboard</a></p>
-        <p><a href="/reports">Go to Reports</a></p>
-        <p><a href="/logout">Logout</a></p>
-        """
-    except Exception as e:
-        return f"Session test error: {str(e)}"
-
-# Initialize database on Vercel
-if os.environ.get('VERCEL'):
-    init_database_on_vercel()
+                print(f"❌ Database recreation failed: {str(e2)}")
 
 if __name__=="__main__":
     init_database()

@@ -44,13 +44,13 @@
     <div class="card budget-utilization-card">
         <div class="card-header">
             <h2 class="card-title">📈 Budget Utilization</h2>
-            <div class="utilization-percentage">{{ "%.1f"|format((total_expenses / budget_amount * 100)) }}%</div>
+            <div class="utilization-percentage">{{ "%.1f"|format((total_expenses / budget_amount * 100) if budget_amount > 0 else 0) }}%</div>
         </div>
         <div class="card-body">
             <div class="progress-container">
                 <div class="progress-bar-container">
-                    <div class="progress-bar {% if total_expenses > budget_amount %}progress-bar-danger{% elif total_expenses > budget_amount * 0.8 %}progress-bar-warning{% else %}progress-bar-success{% endif %}"
-                        style="width: {{ (total_expenses / budget_amount * 100)|round(1) if (total_expenses / budget_amount * 100) <= 100 else 100 }}%">
+                    <div class="progress-bar {% if budget_amount > 0 and total_expenses > budget_amount %}progress-bar-danger{% elif budget_amount > 0 and total_expenses > budget_amount * 0.8 %}progress-bar-warning{% else %}progress-bar-success{% endif %}"
+                        style="width: {{ (total_expenses / budget_amount * 100)|round(1) if budget_amount > 0 and (total_expenses / budget_amount * 100) <= 100 else (100 if budget_amount > 0 else 0) }}%">
                     </div>
                 </div>
                 <div class="progress-labels">
@@ -150,8 +150,8 @@
                 <div class="insight-icon">💡</div>
                 <div class="insight-content">
                     <h3>Spending Pattern</h3>
-                    <p>{% if total_expenses > budget_amount %}You're overspending this month. Consider reviewing your
-                        expenses.{% elif total_expenses > budget_amount * 0.8 %}You're close to your budget limit.
+                    <p>{% if budget_amount > 0 and total_expenses > budget_amount %}You're overspending this month. Consider reviewing your
+                        expenses.{% elif budget_amount > 0 and total_expenses > budget_amount * 0.8 %}You're close to your budget limit.
                         Monitor your spending.{% else %}Great job! You're well within your budget.{% endif %}</p>
                 </div>
             </div>
@@ -160,7 +160,7 @@
                 <div class="insight-icon">📅</div>
                 <div class="insight-content">
                     <h3>Monthly Average</h3>
-                    <p>Your current spending is {{ "%.1f"|format((total_expenses / budget_amount * 100)) }}% of your
+                    <p>Your current spending is {{ "%.1f"|format((total_expenses / budget_amount * 100) if budget_amount > 0 else 0) }}% of your
                         monthly budget.</p>
                 </div>
             </div>
