@@ -345,6 +345,13 @@ class AdminLog(db.Model):
 # ----------------- Routes -----------------
 @app.route("/")
 def home():
+    # Ensure admin user exists on Vercel
+    if os.environ.get('VERCEL'):
+        try:
+            create_admin_user()
+        except Exception as e:
+            app.logger.error(f"Error creating admin user on Vercel: {e}")
+    
     if "user_id" in session:
         user = User.query.get(session["user_id"])
         if user and user.role == 'admin':
@@ -359,17 +366,48 @@ def health_check():
     try:
         # Test database connection
         db.session.execute("SELECT 1")
+        
+        # Check if admin user exists
+        admin_user = User.query.filter_by(email="admin@expensetracker.com").first()
+        admin_exists = admin_user is not None
+        
         return {
             "status": "healthy",
             "database": "connected",
             "environment": "vercel" if os.environ.get('VERCEL') else "local",
-            "ssl_context": "configured" if os.environ.get('VERCEL') else "not needed"
+            "ssl_context": "configured" if os.environ.get('VERCEL') else "not needed",
+            "admin_user_exists": admin_exists,
+            "admin_email": "admin@expensetracker.com" if admin_exists else "not found"
         }
     except Exception as e:
         return {
             "status": "unhealthy",
             "error": str(e),
             "environment": "vercel" if os.environ.get('VERCEL') else "local"
+        }, 500
+
+@app.route("/setup-admin")
+def setup_admin():
+    """Setup admin user for Vercel deployment"""
+    try:
+        create_admin_user()
+        admin_user = User.query.filter_by(email="admin@expensetracker.com").first()
+        if admin_user:
+            return {
+                "status": "success",
+                "message": "Admin user created successfully",
+                "admin_email": "admin@expensetracker.com",
+                "admin_password": "admin123"
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "Failed to create admin user"
+            }, 500
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Error creating admin user: {str(e)}"
         }, 500
 
 @app.route("/register", methods=["GET","POST"])
@@ -462,6 +500,10 @@ def login():
                 flash("Please enter a valid email address.", "danger")
                 return render_template("login.html")
 
+            # Ensure admin user exists on Vercel
+            if os.environ.get('VERCEL'):
+                create_admin_user()
+            
             user = User.query.filter_by(email=email, is_active=True).first()
             
             if user and check_password_hash(user.password, password):
