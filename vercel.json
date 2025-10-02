@@ -13,7 +13,8 @@
     }
   ],
   "env": {
-    "SECRET_KEY": "@expense-tracker-secret-key"
+    "SECRET_KEY": "@expense-tracker-secret-key",
+    "FLASK_ENV": "production"
   },
   "functions": {
     "app.py": {

@@ -19,6 +19,13 @@ from logging.handlers import RotatingFileHandler
 import re
 from functools import wraps
 
+# Configure SSL context for Vercel deployment
+if os.environ.get('VERCEL'):
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    os.environ['SSL_CERT_FILE'] = certifi.where()
+
 app = Flask(__name__)
 
 # Generate secure secret key
@@ -26,7 +33,7 @@ app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
 
 # Session configuration
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # 24 hours session timeout
-app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'  # HTTPS only in production
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('VERCEL') == '1' or os.environ.get('FLASK_ENV') == 'production'  # HTTPS only in production/Vercel
 app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent XSS attacks
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
 
@@ -346,6 +353,25 @@ def home():
             return redirect(url_for("dashboard"))
     return render_template("index.html", app=app)
 
+@app.route("/health")
+def health_check():
+    """Health check endpoint for Vercel deployment"""
+    try:
+        # Test database connection
+        db.session.execute("SELECT 1")
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "environment": "vercel" if os.environ.get('VERCEL') else "local",
+            "ssl_context": "configured" if os.environ.get('VERCEL') else "not needed"
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "environment": "vercel" if os.environ.get('VERCEL') else "local"
+        }, 500
+
 @app.route("/register", methods=["GET","POST"])
 def register():
     if request.method == "POST":
@@ -411,6 +437,9 @@ def register():
                     flash("Username or Email already exists. Please use different credentials.", "danger")
             elif "NOT NULL constraint failed" in error_message:
                 flash("Please fill in all required fields.", "danger")
+            elif "SSL" in error_message or "CERTIFICATE" in error_message:
+                flash("Registration failed: SSL certificate error. Please try again or contact support.", "danger")
+                app.logger.error(f"SSL error during registration: {error_message}")
             else:
                 flash(f"Registration failed: {error_message}", "danger")
             
@@ -461,7 +490,12 @@ def login():
                 
         except Exception as e:
             app.logger.error(f"Login error: {str(e)}")
-            flash("An error occurred during login. Please try again.", "danger")
+            error_message = str(e)
+            if "SSL" in error_message or "CERTIFICATE" in error_message:
+                flash("Login failed: SSL certificate error. Please try again or contact support.", "danger")
+                app.logger.error(f"SSL error during login: {error_message}")
+            else:
+                flash("An error occurred during login. Please try again.", "danger")
             return render_template("login.html")
     
     return render_template("login.html")
