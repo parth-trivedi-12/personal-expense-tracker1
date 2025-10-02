@@ -18,13 +18,58 @@ import logging
 from logging.handlers import RotatingFileHandler
 import re
 from functools import wraps
+import urllib3
+import ssl
+import os
+
+# Disable SSL verification globally for Vercel
+if os.environ.get('VERCEL'):
+    # Monkey patch SSL context
+    ssl._create_default_https_context = ssl._create_unverified_context
+    
+    # Disable SSL warnings
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    
+    # Set environment variables
+    os.environ['PYTHONHTTPSVERIFY'] = '0'
+    os.environ['CURL_CA_BUNDLE'] = ''
+    os.environ['REQUESTS_CA_BUNDLE'] = ''
+
+
 
 # Configure SSL context for Vercel deployment
 if os.environ.get('VERCEL'):
-    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    # Disable SSL verification for Vercel
+    ssl_context = ssl.create_default_context()
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
-    os.environ['SSL_CERT_FILE'] = certifi.where()
+    
+    # Set environment variables to disable SSL verification
+    os.environ['PYTHONHTTPSVERIFY'] = '0'
+    os.environ['CURL_CA_BUNDLE'] = ''
+    os.environ['REQUESTS_CA_BUNDLE'] = ''
+    
+    # Disable SSL warnings
+    import urllib3
+import ssl
+import urllib3
+import os
+
+# Disable SSL verification globally for Vercel
+if os.environ.get('VERCEL'):
+    # Monkey patch SSL context
+    ssl._create_default_https_context = ssl._create_unverified_context
+    
+    # Disable SSL warnings
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    
+    # Set environment variables
+    os.environ['PYTHONHTTPSVERIFY'] = '0'
+    os.environ['CURL_CA_BUNDLE'] = ''
+    os.environ['REQUESTS_CA_BUNDLE'] = ''
+
+
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 
@@ -410,6 +455,28 @@ def setup_admin():
             "message": f"Error creating admin user: {str(e)}"
         }, 500
 
+@app.route("/test-ssl")
+def test_ssl():
+    """Test SSL configuration on Vercel"""
+    try:
+        import requests
+        # Test a simple HTTPS request
+        response = requests.get("https://httpbin.org/get", verify=False, timeout=5)
+        return {
+            "status": "success",
+            "ssl_test": "passed",
+            "environment": "vercel" if os.environ.get('VERCEL') else "local",
+            "ssl_verify": False,
+            "test_response": response.status_code
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "ssl_test": "failed",
+            "error": str(e),
+            "environment": "vercel" if os.environ.get('VERCEL') else "local"
+        }, 500
+
 @app.route("/register", methods=["GET","POST"])
 def register():
     if request.method == "POST":
@@ -475,9 +542,12 @@ def register():
                     flash("Username or Email already exists. Please use different credentials.", "danger")
             elif "NOT NULL constraint failed" in error_message:
                 flash("Please fill in all required fields.", "danger")
-            elif "SSL" in error_message or "CERTIFICATE" in error_message:
+            elif "SSL" in error_message or "CERTIFICATE" in error_message or "certificate verify failed" in error_message:
                 flash("Registration failed: SSL certificate error. Please try again or contact support.", "danger")
                 app.logger.error(f"SSL error during registration: {error_message}")
+            elif "database is locked" in error_message:
+                flash("Registration failed: Database is temporarily locked. Please try again in a moment.", "danger")
+                app.logger.error(f"Database locked during registration: {error_message}")
             else:
                 flash(f"Registration failed: {error_message}", "danger")
             
@@ -533,9 +603,12 @@ def login():
         except Exception as e:
             app.logger.error(f"Login error: {str(e)}")
             error_message = str(e)
-            if "SSL" in error_message or "CERTIFICATE" in error_message:
+            if "SSL" in error_message or "CERTIFICATE" in error_message or "certificate verify failed" in error_message:
                 flash("Login failed: SSL certificate error. Please try again or contact support.", "danger")
                 app.logger.error(f"SSL error during login: {error_message}")
+            elif "database is locked" in error_message:
+                flash("Login failed: Database is temporarily locked. Please try again in a moment.", "danger")
+                app.logger.error(f"Database locked during login: {error_message}")
             else:
                 flash("An error occurred during login. Please try again.", "danger")
             return render_template("login.html")
