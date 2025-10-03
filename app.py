@@ -19,8 +19,6 @@ from logging.handlers import RotatingFileHandler
 import re
 from functools import wraps
 import urllib3
-import ssl
-import os
 
 # Disable SSL verification globally for Vercel
 if os.environ.get('VERCEL'):
