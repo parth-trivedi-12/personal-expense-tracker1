@@ -167,7 +167,7 @@ else:
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
-# Configure logging
+# Configure logging 
 if not app.debug:
     if os.environ.get('VERCEL'):
         # In Vercel, use console logging only
@@ -212,23 +212,33 @@ def validate_password(password):
 def validate_amount(amount_str):
     """Validate and convert amount to float"""
     try:
-        amount = float(amount_str)
+        # Remove currency symbols and commas
+        cleaned_amount = str(amount_str).replace('₹', '').replace(',', '').replace('$', '').strip()
+        amount = float(cleaned_amount)
         if amount < 0:
             return False, None, "Amount cannot be negative"
         if amount > 999999.99:
             return False, None, "Amount too large"
         return True, amount, "Valid amount"
-    except ValueError:
+    except (ValueError, AttributeError):
         return False, None, "Invalid amount format"
 
 def validate_date(date_str):
-    """Validate date format"""
+    """Validate date format - handle both YYYY-MM-DD and DD-MM-YYYY"""
     try:
-        date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        # Try YYYY-MM-DD format first (HTML date input)
+        if len(date_str) == 10 and date_str.count('-') == 2:
+            if date_str[4] == '-':  # YYYY-MM-DD format
+                date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            else:  # DD-MM-YYYY format
+                date = datetime.strptime(date_str, "%d-%m-%Y").date()
+        else:
+            return False, None, "Invalid date format"
+            
         if date > datetime.now().date():
             return False, None, "Date cannot be in the future"
         return True, date, "Valid date"
-    except ValueError:
+    except (ValueError, AttributeError):
         return False, None, "Invalid date format"
 
 def login_required(f):
@@ -663,6 +673,9 @@ def expenses():
             category = request.form.get("category", "")
             description = request.form.get("description", "").strip()
             payment_method = request.form.get("payment_method", "")
+            
+            # Log form data for debugging
+            app.logger.info(f"Form data received - Title: {title}, Amount: {amount_str}, Date: {date_str}, Category: {category}, Payment: {payment_method}")
 
             # Validate input
             if not title or not amount_str or not date_str or not category or not payment_method:

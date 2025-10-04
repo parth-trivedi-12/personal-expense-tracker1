@@ -1,2 +1,31 @@
-<!-- Flash Messages Partial - DISABLED -->
-<!-- All flash messages are disabled to prevent session errors -->
+<!-- Flash Messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div class="flash-messages" style="position: fixed; top: 20px; right: 20px; z-index: 9999; width: 400px;">
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }} alert-dismissible" style="margin-bottom: 10px; padding: 15px; border-radius: 5px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <div class="alert-content" style="display: flex; align-items: center;">
+                        {% if category == 'success' %}
+                            <span class="alert-icon" style="color: #22c55e; font-size: 18px; margin-right: 10px;">✓</span>
+                        {% elif category == 'danger' %}
+                            <span class="alert-icon" style="color: #ef4444; font-size: 18px; margin-right: 10px;">✕</span>
+                        {% elif category == 'warning' %}
+                            <span class="alert-icon" style="color: #f59e0b; font-size: 18px; margin-right: 10px;">⚠</span>
+                        {% elif category == 'info' %}
+                            <span class="alert-icon" style="color: #3b82f6; font-size: 18px; margin-right: 10px;">ℹ</span>
+                        {% endif %}
+                        <span class="alert-message" style="flex: 1; font-weight: 500;">{{ message }}</span>
+                    </div>
+                    <button type="button" class="alert-close" onclick="dismissAlert(this)" aria-label="Close" style="position: absolute; top: 5px; right: 10px; background: none; border: none; font-size: 20px; cursor: pointer; color: #666;">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+<!-- Debug: Show if no messages -->
+{% if not get_flashed_messages() %}
+    <!-- No flash messages -->
+{% endif %}
